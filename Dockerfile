@@ -10,9 +10,6 @@ RUN go mod download
 # Copy seluruh source code
 COPY . .
 
-# Copy .env file for runtime environment variables
-COPY .env .
-
 # Build binary (nama binary = app)
 RUN go build -o main main.go
 
@@ -23,9 +20,6 @@ WORKDIR /root/
 
 # Copy binary dari builder
 COPY --from=builder /app/main .
-
-# Copy .env file from build context to runtime container
-COPY .env .
 
 RUN ls -lah
 
