@@ -18,6 +18,9 @@ func InitDB() (*sql.DB, error) {
 	password := os.Getenv("DB_DOCKER_PASSWORD")
 	database := os.Getenv("DB_DOCKER_NAME")
 
+	log.Printf("DB_DOCKER_HOST=%s DB_DOCKER_PORT=%s DB_DOCKER_USER=%s DB_DOCKER_PASSWORD=%s DB_DOCKER_NAME=%s",
+		host, port, user, password, database)
+
 	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, database)
 

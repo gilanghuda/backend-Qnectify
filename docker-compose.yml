@@ -13,7 +13,6 @@ services:
       POSTGRES_USER: ${DB_DOCKER_USER}
       POSTGRES_PASSWORD: ${DB_DOCKER_PASSWORD}
       POSTGRES_DB: ${DB_DOCKER_NAME}
-      # tambahkan env lain jika perlu
     depends_on:
       postgres:
         condition: service_healthy
