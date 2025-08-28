@@ -10,9 +10,12 @@ services:
     ports:
       - "3000:3000"
     environment:
-      POSTGRES_USER: ${DB_DOCKER_USER}
-      POSTGRES_PASSWORD: ${DB_DOCKER_PASSWORD}
-      POSTGRES_DB: ${DB_DOCKER_NAME}
+      DB_DOCKER_HOST: ${DB_DOCKER_HOST}
+      DB_DOCKER_PORT: ${DB_DOCKER_PORT}
+      DB_DOCKER_USER: ${DB_DOCKER_USER}
+      DB_DOCKER_PASSWORD: ${DB_DOCKER_PASSWORD}
+      DB_DOCKER_NAME: ${DB_DOCKER_NAME}
+      JWT_SECRET: ${JWT_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
