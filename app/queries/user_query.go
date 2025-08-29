@@ -58,7 +58,6 @@ func (q *UserQueries) GetUserByEmail(email string) (models.User, error) {
 	)
 
 	if err != nil {
-		log.Println("Error querying user by email:", err)
 		if err == sql.ErrNoRows {
 			return user, errors.New("user not found")
 		}

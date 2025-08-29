@@ -7,11 +7,10 @@ import (
 )
 
 func RegisterUserRoutes(app *fiber.App) {
-	// Public routes
 	app.Post("/signup", controllers.UserSignUp)
 	app.Post("/signin", controllers.UserSignIn)
+	app.Post("/logout", controllers.UserLogout)
 
-	// Protected routes example
 	user := app.Group("/user", middleware.JWTProtected())
-	user.Get("/profile", controllers.UserProfile) // You need to implement UserProfile
+	user.Get("/profile", controllers.UserProfile)
 }

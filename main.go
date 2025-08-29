@@ -6,14 +6,18 @@ import (
 	"github.com/gilanghuda/backend-Quizzo/pkg/database"
 	"github.com/gilanghuda/backend-Quizzo/pkg/routes"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	// Try to load .env, but don't fail if not found (for production/CI)
 	_ = godotenv.Load()
 
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		BodyLimit: 20 * 1024 * 1024,
+	})
+
+	app.Use(cors.New())
 
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Hello, World!")
@@ -25,6 +29,7 @@ func main() {
 	}
 
 	routes.RegisterUserRoutes(app)
+	routes.RegisterQuizRoutes(app)
 
 	log.Fatal(app.Listen(":3000"))
 }
