@@ -3,12 +3,50 @@ package controllers
 import (
 	"fmt"
 	"log"
+	"strconv"
 
+	"github.com/gilanghuda/backend-Quizzo/app/models"
+	"github.com/gilanghuda/backend-Quizzo/app/queries"
+	"github.com/gilanghuda/backend-Quizzo/pkg/database"
 	"github.com/gilanghuda/backend-Quizzo/pkg/utils"
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func UploadAndGenerateQuiz(c *fiber.Ctx) error {
+	numQuestionsStr := c.FormValue("num_questions")
+	difficulty := c.FormValue("difficulty")
+	description := c.FormValue("description")
+
+	if numQuestionsStr == "" || difficulty == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "num_questions and difficulty are required",
+		})
+	}
+
+	numQuestions, _ := strconv.Atoi(numQuestionsStr)
+
+	claims := c.Locals("user")
+	var mapClaims map[string]interface{}
+
+	switch v := claims.(type) {
+	case map[string]interface{}:
+		mapClaims = v
+	case jwt.MapClaims:
+		mapClaims = map[string]interface{}(v)
+	default:
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Invalid token claims",
+		})
+	}
+
+	userID, ok := mapClaims["user_id"].(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Invalid user id in token",
+		})
+	}
+
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -24,22 +62,63 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 	}
 	defer file.Close()
 
-	content, err := utils.ExtractContent(file, fileHeader)
+	quizIntf, err := utils.GenerateQuiz(file, numQuestions, difficulty)
 	if err != nil {
-		log.Printf("Error extracting content: %v", err)
+		log.Printf("Error generating quiz from file: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fmt.Sprintf("failed to extract content: %v", err),
+			"error": fmt.Sprintf("failed to generate quiz: %v", err),
 		})
 	}
 
-	quiz, err := utils.GenerateQuizFromContent([]byte(content), 5, "medium")
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to generate quiz",
-		})
+	quiz, ok := quizIntf.(models.Quiz)
+	if !ok {
+		qptr, ok2 := quizIntf.(*models.Quiz)
+		if !ok2 || qptr == nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "invalid quiz format"})
+		}
+		quiz = *qptr
 	}
 
-	return c.JSON(fiber.Map{
-		"quiz": quiz,
-	})
+	db := database.DB
+	if db == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "database not initialized"})
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("failed to begin tx: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to begin transaction"})
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	quizID, err := queries.InsertQuiz(tx, quiz, userID, description)
+	if err != nil {
+		log.Printf("InsertQuiz error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert quiz"})
+	}
+
+	questionIDs, err := queries.InsertQuestionsBulk(tx, quizID, quiz.Questions)
+	if err != nil {
+		log.Printf("InsertQuestionsBulk error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert questions"})
+	}
+
+	if err := queries.InsertOptionsBulk(tx, questionIDs, quiz.Questions); err != nil {
+		log.Printf("InsertOptionsBulk error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert options"})
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("tx commit error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to commit transaction"})
+	}
+	committed = true
+
+	return c.JSON(fiber.Map{"quiz_id": quizID, "message": "quiz generated and saved successfully"})
 }

@@ -2,44 +2,63 @@ package utils
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gilanghuda/backend-Quizzo/app/models"
 )
 
-func GenerateQuizFromContent(content []byte, question_count int, difficulty string) (interface{}, error) {
+func GenerateQuiz(file io.Reader, question_count int, difficulty string) (interface{}, error) {
 	apiKey := os.Getenv("GOOGLE_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GOOGLE_API_KEY not set")
 	}
 
-	promptText := fmt.Sprintf(`Buatkan %d soal pilihan ganda dengan tingkat kesulitan %s berdasarkan materi berikut. 
-Format output sebagai JSON dengan struktur:
-{
-  "questions": [
-    {
-      "question": "Pertanyaan",
-      "options": ["A. Option1", "B. Option2", "C. Option3", "D. Option4"],
-      "correct_answer": "A",
-    }
-  ]
-}
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %v", err)
+	}
 
-Materi:
-%s`, question_count, difficulty, string(content))
+	mimeType := "application/octet-stream"
+	if len(fileBytes) >= 512 {
+		mimeType = http.DetectContentType(fileBytes[:512])
+	} else if len(fileBytes) > 0 {
+		mimeType = http.DetectContentType(fileBytes)
+	}
+
+	if strings.Contains(mimeType, "zip") || strings.Contains(mimeType, "officedocument") || strings.Contains(mimeType, "msword") {
+		return nil, fmt.Errorf("file mime type %s not supported by Gemini. Please extract the archive and upload a supported file (PDF, TXT, HTML, image), or provide the extracted content as text", mimeType)
+	}
+	b64 := base64.StdEncoding.EncodeToString(fileBytes)
+	promptText := fmt.Sprintf(`Berikan HANYA objek JSON mentah (raw JSON) yang valid berdasarkan materi terlampir.
+
+	Aturan:
+	- Buat %d soal pilihan ganda dengan tingkat kesulitan %s.
+	- JANGAN sertakan teks pengantar, penjelasan, atau markdown format seperti %s.
+	- Strukturnya harus seperti ini:
+	{
+	"questions": [
+		{
+		"question": "Isi pertanyaan...",
+		"options": ["A. Opsi 1", "B. Opsi 2", "C. Opsi 3", "D. Opsi 4"],
+		"correct_answer": "A"
+		}
+	]
+	}
+`, question_count, difficulty, "```json")
 
 	payload := map[string]interface{}{
 		"contents": []map[string]interface{}{
 			{
-				"parts": []map[string]string{
-					{
-						"text": promptText,
-					},
+				"parts": []map[string]interface{}{
+					{"text": promptText},
+					{"inline_data": map[string]string{"mime_type": mimeType, "data": b64}},
 				},
 			},
 		},
@@ -72,7 +91,6 @@ Materi:
 	log.Println("Gemini raw response:", string(respBody))
 
 	var geminiResp models.GeminiResponse
-
 	if err := json.Unmarshal(respBody, &geminiResp); err != nil {
 		return nil, err
 	}
@@ -88,7 +106,56 @@ Materi:
 		}, nil
 	}
 
-	return map[string]interface{}{
-		"result": result,
-	}, nil
+	clean := strings.ReplaceAll(result, "```json", "")
+	clean = strings.ReplaceAll(clean, "```", "")
+	clean = strings.TrimSpace(clean)
+
+	var aiResp models.AiResp
+
+	if err := json.Unmarshal([]byte(clean), &aiResp); err != nil {
+		return map[string]interface{}{
+			"raw_response": result,
+			"error":        fmt.Sprintf("failed to parse generated JSON: %v", err),
+		}, nil
+	}
+
+	quiz := models.Quiz{
+		Title:      "Generated Quiz",
+		Difficulty: difficulty,
+		Questions:  []models.Question{},
+	}
+
+	for _, q := range aiResp.Questions {
+		mq := models.Question{
+			Question: q.Question,
+			Options:  []models.Option{},
+		}
+		for _, opt := range q.Options {
+			label := ""
+			content := strings.TrimSpace(opt)
+			if len(content) >= 2 {
+				first := strings.TrimSpace(content[:1])
+				sep := content[1]
+				if (sep == '.' || sep == ')') && strings.ToUpper(first) >= "A" && strings.ToUpper(first) <= "Z" {
+					label = strings.ToUpper(first)
+					content = strings.TrimSpace(content[2:])
+				}
+			}
+			isCorrect := false
+			if label != "" && strings.ToUpper(q.CorrectAnswer) == label {
+				isCorrect = true
+			} else if q.CorrectAnswer != "" && strings.EqualFold(strings.TrimSpace(q.CorrectAnswer), content) {
+				isCorrect = true
+			}
+
+			mo := models.Option{
+				Content:   content,
+				IsCorrect: isCorrect,
+			}
+			mq.Options = append(mq.Options, mo)
+		}
+		quiz.Questions = append(quiz.Questions, mq)
+	}
+
+	return quiz, nil
 }
