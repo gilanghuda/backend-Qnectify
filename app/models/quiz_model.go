@@ -1,10 +1,17 @@
 package models
 
+import (
+	"database/sql"
+
+	"github.com/google/uuid"
+)
+
 type Quiz struct {
-	ID         uint       `json:"id,omitempty"`
-	Title      string     `json:"title"`
-	Difficulty string     `json:"difficulty"`
-	TimeLimit  string     `json:"time_limit"`
-	CreatedBy  string     `json:"created_by"`
-	Questions  []Question `json:"questions"`
+	ID          uuid.UUID      `json:"id,omitempty"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	Difficulty  string         `json:"difficulty"`
+	TimeLimit   sql.NullString `json:"time_limit"`
+	CreatedBy   string         `json:"created_by"`
+	Questions   []Question     `json:"questions"`
 }

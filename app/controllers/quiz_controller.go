@@ -96,20 +96,20 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 			_ = tx.Rollback()
 		}
 	}()
-
-	quizID, err := queries.InsertQuiz(tx, quiz, userID, description)
+	quizQueries := queries.QuizQueries{DB: database.DB}
+	quizID, err := quizQueries.InsertQuiz(quiz, userID, description)
 	if err != nil {
 		log.Printf("InsertQuiz error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert quiz"})
 	}
 
-	questionIDs, err := queries.InsertQuestionsBulk(tx, quizID, quiz.Questions)
+	questionIDs, err := quizQueries.InsertQuestionsBulk(quizID, quiz.Questions)
 	if err != nil {
 		log.Printf("InsertQuestionsBulk error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert questions"})
 	}
 
-	if err := queries.InsertOptionsBulk(tx, questionIDs, quiz.Questions); err != nil {
+	if err := quizQueries.InsertOptionsBulk(questionIDs, quiz.Questions); err != nil {
 		log.Printf("InsertOptionsBulk error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert options"})
 	}
@@ -121,4 +121,35 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 	committed = true
 
 	return c.JSON(fiber.Map{"quiz_id": quizID, "message": "quiz generated and saved successfully"})
+}
+
+func GetQuizByUser(c *fiber.Ctx) error {
+	claims := c.Locals("user")
+	var mapClaims map[string]interface{}
+
+	switch v := claims.(type) {
+	case map[string]interface{}:
+		mapClaims = v
+	case jwt.MapClaims:
+		mapClaims = map[string]interface{}(v)
+	default:
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Invalid token claims",
+		})
+	}
+
+	userID, ok := mapClaims["user_id"].(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Invalid user id in token",
+		})
+	}
+	quizQueries := queries.QuizQueries{DB: database.DB}
+	quiz, err := quizQueries.GetQuizByUserId(userID)
+	if err != nil {
+		log.Printf("GetQuizByUserId error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get quiz"})
+	}
+
+	return c.JSON(fiber.Map{"quiz": quiz})
 }

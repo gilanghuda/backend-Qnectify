@@ -11,4 +11,5 @@ func RegisterQuizRoutes(app *fiber.App) {
 
 	quiz := app.Group("/quiz", middleware.JWTProtected())
 	quiz.Post("/upload", controllers.UploadAndGenerateQuiz)
+	quiz.Get("/getMyQuiz", controllers.GetQuizByUser)
 }

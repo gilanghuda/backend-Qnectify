@@ -2,6 +2,7 @@ package queries
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,7 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
-func InsertQuiz(tx *sql.Tx, quiz models.Quiz, createdBy string, description string) (string, error) {
+type QuizQueries struct {
+	DB *sql.DB
+}
+
+func (q *QuizQueries) InsertQuiz(quiz models.Quiz, createdBy string, description string) (string, error) {
 	userID, err := uuid.Parse(createdBy)
 	if err != nil {
 		return "", err
@@ -17,13 +22,13 @@ func InsertQuiz(tx *sql.Tx, quiz models.Quiz, createdBy string, description stri
 
 	var quizID string
 	query := `INSERT INTO quizzes (title, description, difficulty_level, time_limit, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`
-	if err := tx.QueryRow(query, quiz.Title, description, quiz.Difficulty, nil, userID).Scan(&quizID); err != nil {
+	if err := q.DB.QueryRow(query, quiz.Title, description, quiz.Difficulty, nil, userID).Scan(&quizID); err != nil {
 		return "", err
 	}
 	return quizID, nil
 }
 
-func InsertQuestionsBulk(tx *sql.Tx, quizID string, questions []models.Question) ([]string, error) {
+func (q *QuizQueries) InsertQuestionsBulk(quizID string, questions []models.Question) ([]string, error) {
 	if len(questions) == 0 {
 		return nil, nil
 	}
@@ -38,7 +43,7 @@ func InsertQuestionsBulk(tx *sql.Tx, quizID string, questions []models.Question)
 	}
 
 	query := fmt.Sprintf("INSERT INTO quiz_questions (quiz_id, question_text) VALUES %s RETURNING id", strings.Join(vals, ","))
-	rows, err := tx.Query(query, args...)
+	rows, err := q.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -59,16 +64,16 @@ func InsertQuestionsBulk(tx *sql.Tx, quizID string, questions []models.Question)
 	return ids, nil
 }
 
-func InsertOption(tx *sql.Tx, questionID string, opt models.Option) (string, error) {
+func (q *QuizQueries) InsertOption(questionID string, opt models.Option) (string, error) {
 	var optID string
 	optQuery := `INSERT INTO quiz_options (question_id, content, is_correct) VALUES ($1,$2,$3) RETURNING id`
-	if err := tx.QueryRow(optQuery, questionID, opt.Content, opt.IsCorrect).Scan(&optID); err != nil {
+	if err := q.DB.QueryRow(optQuery, questionID, opt.Content, opt.IsCorrect).Scan(&optID); err != nil {
 		return "", err
 	}
 	return optID, nil
 }
 
-func InsertOptionsBulk(tx *sql.Tx, questionIDs []string, questions []models.Question) error {
+func (q *QuizQueries) InsertOptionsBulk(questionIDs []string, questions []models.Question) error {
 	var args []interface{}
 	vals := make([]string, 0)
 	idx := 1
@@ -91,8 +96,73 @@ func InsertOptionsBulk(tx *sql.Tx, questionIDs []string, questions []models.Ques
 	}
 
 	query := fmt.Sprintf("INSERT INTO quiz_options (question_id, content, is_correct) VALUES %s", strings.Join(vals, ","))
-	if _, err := tx.Exec(query, args...); err != nil {
+	if _, err := q.DB.Exec(query, args...); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (q *QuizQueries) GetQuizByUserId(userID string) (*models.Quiz, error) {
+	var quiz models.Quiz
+	var questionsJSON []byte
+
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	query := `
+        SELECT 
+            q.id,
+            q.title,
+            q.description,
+            q.difficulty_level,
+            q.time_limit,
+            q.created_by,
+            COALESCE(json_agg(
+                json_build_object(
+                    'id', qq.id,
+                    'quiz_id', qq.quiz_id,
+                    'question_text', qq.question_text,
+                    'options', (
+                        SELECT json_agg(
+                            json_build_object(
+                                'id', qo.id,
+                                'question_id', qo.question_id,
+                                'content', qo.content,
+                                'is_correct', qo.is_correct
+                            )
+                        )
+                        FROM quiz_options qo
+                        WHERE qo.question_id = qq.id
+                    )
+                )
+            ), '[]') AS questions
+        FROM quizzes q
+        JOIN quiz_questions qq ON qq.quiz_id = q.id
+        WHERE q.created_by = $1
+        GROUP BY q.id, q.title, q.description, q.difficulty_level, q.time_limit, q.created_by;
+    `
+
+	err = q.DB.QueryRow(query, userUUID).Scan(
+		&quiz.ID,
+		&quiz.Title,
+		&quiz.Description,
+		&quiz.Difficulty,
+		&quiz.TimeLimit,
+		&quiz.CreatedBy,
+		&questionsJSON,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if err := json.Unmarshal(questionsJSON, &quiz.Questions); err != nil {
+		return nil, err
+	}
+
+	return &quiz, nil
 }
