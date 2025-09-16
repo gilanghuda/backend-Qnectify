@@ -72,3 +72,18 @@ func UnfollowUser(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "unfollowed"})
 }
+
+func RecommendUsers(c *fiber.Ctx) error {
+	userID, err := utils.ExtractUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	uq := queries.UserQueries{DB: database.DB}
+	res, err := uq.GetRecommendedUsers(userID, 5)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get recommendations"})
+	}
+
+	return c.JSON(fiber.Map{"recommendations": res})
+}

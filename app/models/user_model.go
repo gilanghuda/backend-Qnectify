@@ -18,3 +18,11 @@ type User struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
+
+// RecommendedUser is a compact model for follow recommendations
+type RecommendedUser struct {
+	ID            uuid.UUID `json:"id"`
+	Username      string    `json:"username"`
+	Email         string    `json:"email"`
+	FollowerCount int       `json:"follower_count"`
+}

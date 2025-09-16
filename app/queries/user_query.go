@@ -138,3 +138,43 @@ func (q *UserQueries) UnfollowUser(follower uuid.UUID, following uuid.UUID) erro
 	}
 	return nil
 }
+
+func (q *UserQueries) GetRecommendedUsers(userID uuid.UUID, limit int) ([]models.RecommendedUser, error) {
+	query := `
+	SELECT u.uid, u.username, u.email, COALESCE(f.follower_count,0) as follower_count
+	FROM users u
+	LEFT JOIN (
+		SELECT following as user_id, COUNT(*) as follower_count
+		FROM socials
+		GROUP BY following
+	) f ON f.user_id = u.uid
+	WHERE u.uid != $1
+	  AND u.uid NOT IN (
+		SELECT following FROM socials WHERE follower_id = $1
+	  )
+	ORDER BY follower_count DESC
+	LIMIT $2
+	`
+
+	rows, err := q.DB.Query(query, userID, limit)
+	if err != nil {
+		println("Error executing query:", err.Error())
+		return nil, err
+	}
+	defer rows.Close()
+
+	var res []models.RecommendedUser
+	for rows.Next() {
+		var r models.RecommendedUser
+		if err := rows.Scan(&r.ID, &r.Username, &r.Email, &r.FollowerCount); err != nil {
+			return nil, err
+		}
+		res = append(res, r)
+	}
+	if err := rows.Err(); err != nil {
+		println("Error iterating over rows:", err.Error())
+		return nil, err
+	}
+
+	return res, nil
+}
