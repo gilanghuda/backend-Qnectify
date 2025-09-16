@@ -136,7 +136,6 @@ func UserSignIn(c *fiber.Ctx) error {
 		Expires:  time.Now().Add(time.Hour * 72),
 		Path:     "/",
 		HTTPOnly: true,
-		Secure:   true,
 		SameSite: "None",
 	})
 
