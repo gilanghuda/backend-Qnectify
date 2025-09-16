@@ -148,6 +148,7 @@ func UserSignIn(c *fiber.Ctx) error {
 			"email":     user.Email,
 			"user_role": user.UserRole,
 		},
+		"token": tokenString,
 	})
 }
 
