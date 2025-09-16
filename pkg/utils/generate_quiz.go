@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -38,19 +37,21 @@ func GenerateQuiz(file io.Reader, question_count int, difficulty string) (interf
 	b64 := base64.StdEncoding.EncodeToString(fileBytes)
 	promptText := fmt.Sprintf(`Berikan HANYA objek JSON mentah (raw JSON) yang valid berdasarkan materi terlampir.
 
-	Aturan:
-	- Buat %d soal pilihan ganda dengan tingkat kesulitan %s.
-	- JANGAN sertakan teks pengantar, penjelasan, atau markdown format seperti %s.
-	- Strukturnya harus seperti ini:
-	{
-	"questions": [
-		{
-		"question": "Isi pertanyaan...",
-		"options": ["A. Opsi 1", "B. Opsi 2", "C. Opsi 3", "D. Opsi 4"],
-		"correct_answer": "A"
-		}
-	]
-	}
+Aturan:
+- Buat %d soal pilihan ganda dengan tingkat kesulitan %s.
+- Judul ("title") harus dihasilkan secara otomatis berdasarkan isi materi.
+- JANGAN sertakan teks pengantar, penjelasan, atau markdown format seperti %s.
+- Strukturnya harus seperti ini:
+{
+  "title": "Judul yang relevan dengan materi",
+  "questions": [
+    {
+      "question": "Isi pertanyaan...",
+      "options": ["A. Opsi 1", "B. Opsi 2", "C. Opsi 3", "D. Opsi 4"],
+      "correct_answer": "A"
+    }
+  ]
+}
 `, question_count, difficulty, "```json")
 
 	payload := map[string]interface{}{
@@ -88,8 +89,6 @@ func GenerateQuiz(file io.Reader, question_count int, difficulty string) (interf
 		return nil, err
 	}
 
-	log.Println("Gemini raw response:", string(respBody))
-
 	var geminiResp models.GeminiResponse
 	if err := json.Unmarshal(respBody, &geminiResp); err != nil {
 		return nil, err
@@ -110,7 +109,14 @@ func GenerateQuiz(file io.Reader, question_count int, difficulty string) (interf
 	clean = strings.ReplaceAll(clean, "```", "")
 	clean = strings.TrimSpace(clean)
 
-	var aiResp models.AiResp
+	var aiResp struct {
+		Title     string `json:"title"`
+		Questions []struct {
+			Question      string   `json:"question"`
+			Options       []string `json:"options"`
+			CorrectAnswer string   `json:"correct_answer"`
+		} `json:"questions"`
+	}
 
 	if err := json.Unmarshal([]byte(clean), &aiResp); err != nil {
 		return map[string]interface{}{
@@ -120,7 +126,7 @@ func GenerateQuiz(file io.Reader, question_count int, difficulty string) (interf
 	}
 
 	quiz := models.Quiz{
-		Title:      "Generated Quiz",
+		Title:      aiResp.Title,
 		Difficulty: difficulty,
 		Questions:  []models.Question{},
 	}
