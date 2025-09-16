@@ -40,6 +40,10 @@ func CreateStudyGroup(c *fiber.Ctx) error {
 		})
 	}
 
+	if err := studyGroupQueries.JoinStudyGroup(created.ID, userID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to add creator as member"})
+	}
+
 	return c.JSON(fiber.Map{"study_group": created})
 }
 
@@ -101,7 +105,25 @@ func JoinStudyGroup(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid group id"})
 	}
+	var req struct {
+		InvitationCode string `json:"invitation_code"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+	}
 	q := queries.StudyGroupQueries{DB: database.DB}
+	group, err := q.GetStudyGroup(groupID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get study group"})
+	}
+	if group == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "study group not found"})
+	}
+	if group.IsPrivate {
+		if group.InviteCode == nil || req.InvitationCode == "" || req.InvitationCode != *group.InviteCode {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "invalid invitation code"})
+		}
+	}
 	if err := q.JoinStudyGroup(groupID, userID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to join study group"})
 	}

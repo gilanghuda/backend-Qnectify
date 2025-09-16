@@ -204,3 +204,199 @@ func (q *QuizQueries) GetQuizzesFromFollowing(userID string) ([]models.Quiz, err
 
 	return res, nil
 }
+
+func (q *QuizQueries) InsertQuizAttempt(quizID, userID string, score, totalQuestions int, isCompleted bool) (string, error) {
+	var attemptID string
+	query := `INSERT INTO attempts_quiz (quiz_id, user_id, score, total_questions, is_completed) VALUES ($1, $2, $3, $4, $5) RETURNING id`
+	if err := q.DB.QueryRow(query, quizID, userID, score, totalQuestions, isCompleted).Scan(&attemptID); err != nil {
+		return "", err
+	}
+	return attemptID, nil
+}
+
+func (q *QuizQueries) EvaluateQuizAttempt(quizID string, answers map[string]string) (int, int, error) {
+	if len(answers) == 0 {
+		var cnt int
+		err := q.DB.QueryRow(`SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = $1`, quizID).Scan(&cnt)
+		if err != nil {
+			return 0, 0, err
+		}
+		return 0, cnt, nil
+	}
+	correct := 0
+	for qid, oid := range answers {
+		var isCorrect bool
+		err := q.DB.QueryRow(`SELECT is_correct FROM quiz_options WHERE id = $1 AND question_id = $2`, oid, qid).Scan(&isCorrect)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				continue
+			}
+			return 0, 0, err
+		}
+		if isCorrect {
+			correct++
+		}
+	}
+	return correct, len(answers), nil
+}
+
+func (q *QuizQueries) GetAttemptsForUser(userID string, quizID *string, limit int) ([]models.Attempt, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	base := `SELECT id, quiz_id, user_id, score, total_questions, submitted_at, is_completed FROM attempts_quiz WHERE user_id = $1`
+	args := []interface{}{uid}
+	if quizID != nil {
+		base += ` AND quiz_id = $2`
+		args = append(args, *quizID)
+	}
+	base += ` ORDER BY submitted_at DESC`
+	if limit > 0 {
+		base += ` LIMIT ` + fmt.Sprintf("%d", limit)
+	}
+
+	rows, err := q.DB.Query(base, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := []models.Attempt{}
+	for rows.Next() {
+		var a models.Attempt
+		if err := rows.Scan(&a.ID, &a.QuizID, &a.UserID, &a.Score, &a.TotalQuestions, &a.SubmittedAt, &a.IsCompleted); err != nil {
+			return nil, err
+		}
+		res = append(res, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (q *QuizQueries) GetQuizByID(quizID string) (*models.Quiz, error) {
+	var quiz models.Quiz
+	var questionsJSON []byte
+
+	id, err := uuid.Parse(quizID)
+	if err != nil {
+		return nil, err
+	}
+
+	query := `
+        SELECT 
+            q.id,
+            q.title,
+            q.description,
+            q.difficulty_level,
+            q.time_limit,
+            q.created_by,
+            COALESCE(json_agg(
+                json_build_object(
+                    'id', qq.id,
+                    'quiz_id', qq.quiz_id,
+                    'question_text', qq.question_text,
+                    'options', (
+                        SELECT json_agg(
+                            json_build_object(
+                                'id', qo.id,
+                                'question_id', qo.question_id,
+                                'content', qo.content,
+                                'is_correct', qo.is_correct
+                            )
+                        )
+                        FROM quiz_options qo
+                        WHERE qo.question_id = qq.id
+                    )
+                )
+            ) FILTER (WHERE qq.id IS NOT NULL), '[]') AS questions
+        FROM quizzes q
+        LEFT JOIN quiz_questions qq ON qq.quiz_id = q.id
+        WHERE q.id = $1
+        GROUP BY q.id, q.title, q.description, q.difficulty_level, q.time_limit, q.created_by;
+    `
+
+	err = q.DB.QueryRow(query, id).Scan(
+		&quiz.ID,
+		&quiz.Title,
+		&quiz.Description,
+		&quiz.Difficulty,
+		&quiz.TimeLimit,
+		&quiz.CreatedBy,
+		&questionsJSON,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if err := json.Unmarshal(questionsJSON, &quiz.Questions); err != nil {
+		return nil, err
+	}
+
+	return &quiz, nil
+}
+
+func (q *QuizQueries) GetUserLeaderboard(limit int) ([]models.UserLeaderboardEntry, error) {
+	base := `SELECT u.uid, u.username, u.image_url, COALESCE(SUM(a.score),0) as total_score FROM users u LEFT JOIN attempts_quiz a ON a.user_id = u.uid GROUP BY u.uid, u.username, u.image_url ORDER BY total_score DESC`
+	if limit > 0 {
+		base += ` LIMIT ` + fmt.Sprintf("%d", limit)
+	}
+
+	rows, err := q.DB.Query(base)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := []models.UserLeaderboardEntry{}
+	for rows.Next() {
+		var e models.UserLeaderboardEntry
+		if err := rows.Scan(&e.UserID, &e.Username, &e.ImageURL, &e.TotalScore); err != nil {
+			return nil, err
+		}
+		res = append(res, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (q *QuizQueries) GetStudyGroupLeaderboard(limit int) ([]models.StudyGroupLeaderboardEntry, error) {
+	query := `
+SELECT sg.id, sg.name, sg.member_count, COALESCE(SUM(a.score),0) AS total_score
+FROM study_group sg
+LEFT JOIN study_group_member sgm ON sgm.group_id = sg.id
+LEFT JOIN attempts_quiz a ON a.user_id = sgm.user_id
+GROUP BY sg.id, sg.name, sg.member_count
+ORDER BY total_score DESC
+`
+	if limit > 0 {
+		query += ` LIMIT ` + fmt.Sprintf("%d", limit)
+	}
+
+	rows, err := q.DB.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := []models.StudyGroupLeaderboardEntry{}
+	for rows.Next() {
+		var e models.StudyGroupLeaderboardEntry
+		if err := rows.Scan(&e.GroupID, &e.Name, &e.MemberCount, &e.TotalScore); err != nil {
+			return nil, err
+		}
+		res = append(res, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return res, nil
+}

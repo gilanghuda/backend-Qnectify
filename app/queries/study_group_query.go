@@ -92,7 +92,19 @@ func (q *StudyGroupQueries) DeleteStudyGroup(id uuid.UUID) error {
 }
 
 func (q *StudyGroupQueries) JoinStudyGroup(groupID, userID uuid.UUID) error {
-	query := `INSERT INTO study_group_member (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
-	_, err := q.DB.Exec(query, groupID, userID)
-	return err
+	res, err := q.DB.Exec(`INSERT INTO study_group_member (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, groupID, userID)
+	if err != nil {
+		return err
+	}
+	ra, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if ra > 0 {
+		_, err = q.DB.Exec(`UPDATE study_group SET member_count = member_count + 1 WHERE id = $1`, groupID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
