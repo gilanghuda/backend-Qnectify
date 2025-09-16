@@ -153,3 +153,19 @@ func GetQuizByUser(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"quiz": quiz})
 }
+
+func GetFeed(c *fiber.Ctx) error {
+	userID, err := utils.ExtractUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	q := queries.QuizQueries{DB: database.DB}
+	feed, err := q.GetQuizzesFromFollowing(userID.String())
+	if err != nil {
+		log.Printf("GetQuizzesFromFollowing error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get feed"})
+	}
+
+	return c.JSON(fiber.Map{"feed": feed})
+}

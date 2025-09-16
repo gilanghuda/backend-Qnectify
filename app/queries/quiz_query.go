@@ -166,3 +166,41 @@ func (q *QuizQueries) GetQuizByUserId(userID string) (*models.Quiz, error) {
 
 	return &quiz, nil
 }
+
+func (q *QuizQueries) GetQuizzesFromFollowing(userID string) ([]models.Quiz, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	query := `
+	SELECT q.id, q.title, q.description, q.difficulty_level, q.created_by, 
+		COALESCE((SELECT COUNT(*) FROM attempts_quiz a WHERE a.quiz_id = q.id), 0) AS attempts_count,
+		q.created_at
+	FROM quizzes q
+	JOIN socials s ON s.following = q.created_by
+	WHERE s.follower_id = $1
+	ORDER BY q.created_at DESC
+	LIMIT 10
+	`
+
+	rows, err := q.DB.Query(query, uid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var res []models.Quiz
+	for rows.Next() {
+		var qs models.Quiz
+		if err := rows.Scan(&qs.ID, &qs.Title, &qs.Description, &qs.Difficulty, &qs.CreatedBy, &qs.Attempts, &qs.CreatedAt); err != nil {
+			return nil, err
+		}
+		res = append(res, qs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}

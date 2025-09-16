@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -13,5 +14,7 @@ type Quiz struct {
 	Difficulty  string         `json:"difficulty"`
 	TimeLimit   sql.NullString `json:"time_limit"`
 	CreatedBy   string         `json:"created_by"`
+	Attempts    int            `json:"attempts,omitempty"`
 	Questions   []Question     `json:"questions"`
+	CreatedAt   time.Time      `json:"created_at,omitempty"`
 }
