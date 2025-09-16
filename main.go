@@ -25,7 +25,7 @@ func main() {
 	}))
 
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Hello, World!")
+		return c.SendString("versi 2 ")
 	})
 
 	_, err := database.InitDB()
