@@ -13,4 +13,6 @@ func RegisterUserRoutes(app *fiber.App) {
 
 	user := app.Group("/user", middleware.JWTProtected())
 	user.Get("/profile", controllers.UserProfile)
+	user.Post("/follow/:id", controllers.FollowUser)
+	user.Post("/unfollow/:id", controllers.UnfollowUser)
 }

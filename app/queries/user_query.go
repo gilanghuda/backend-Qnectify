@@ -7,6 +7,7 @@ import (
 
 	"github.com/gilanghuda/backend-Quizzo/app/models"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type UserQueries struct {
@@ -104,5 +105,36 @@ func (q *UserQueries) DeleteUser(id uuid.UUID) error {
 		return errors.New("no user deleted")
 	}
 
+	return nil
+}
+
+func (q *UserQueries) FollowUser(follower uuid.UUID, following uuid.UUID) error {
+	if follower == following {
+		return errors.New("cannot follow yourself")
+	}
+
+	query := `INSERT INTO socials (follower_id, following) VALUES ($1, $2)`
+	if _, err := q.DB.Exec(query, follower, following); err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return errors.New("already following")
+		}
+		return err
+	}
+	return nil
+}
+
+func (q *UserQueries) UnfollowUser(follower uuid.UUID, following uuid.UUID) error {
+	query := `DELETE FROM socials WHERE follower_id = $1 AND following = $2`
+	res, err := q.DB.Exec(query, follower, following)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return errors.New("not following")
+	}
 	return nil
 }
