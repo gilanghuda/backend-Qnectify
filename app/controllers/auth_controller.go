@@ -134,6 +134,7 @@ func UserSignIn(c *fiber.Ctx) error {
 		Name:     "token",
 		Value:    tokenString,
 		Expires:  time.Now().Add(time.Hour * 72),
+		Domain:   "localhost",
 		Path:     "/",
 		HTTPOnly: true,
 		Secure:   false,
