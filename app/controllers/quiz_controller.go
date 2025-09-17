@@ -145,7 +145,7 @@ func GetQuizByUser(c *fiber.Ctx) error {
 		})
 	}
 	quizQueries := queries.QuizQueries{DB: database.DB}
-	quiz, err := quizQueries.GetQuizzesFromFollowing(userID)
+	quiz, err := quizQueries.GetQuizByUserId(userID)
 	if err != nil {
 		log.Printf("GetQuizByUserId error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get quiz"})

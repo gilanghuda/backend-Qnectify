@@ -157,9 +157,12 @@ func UserLogout(c *fiber.Ctx) error {
 		Name:     "token",
 		Value:    "",
 		Expires:  time.Now().Add(-time.Hour),
+		Domain:   "localhost",
+		Path:     "/",
 		HTTPOnly: true,
-		Secure:   true,
-		SameSite: "Lax",
+		Secure:   false,
+		SameSite: "lax",
+		MaxAge:   -1,
 	})
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"message": "Logout successful",

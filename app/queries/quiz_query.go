@@ -104,7 +104,6 @@ func (q *QuizQueries) InsertOptionsBulk(questionIDs []string, questions []models
 
 func (q *QuizQueries) GetQuizByUserId(userID string) (*models.Quiz, error) {
 	var quiz models.Quiz
-	var questionsJSON []byte
 
 	userUUID, err := uuid.Parse(userID)
 	if err != nil {
@@ -112,36 +111,10 @@ func (q *QuizQueries) GetQuizByUserId(userID string) (*models.Quiz, error) {
 	}
 
 	query := `
-        SELECT 
-            q.id,
-            q.title,
-            q.description,
-            q.difficulty_level,
-            q.time_limit,
-            q.created_by,
-            COALESCE(json_agg(
-                json_build_object(
-                    'id', qq.id,
-                    'quiz_id', qq.quiz_id,
-                    'question_text', qq.question_text,
-                    'options', (
-                        SELECT json_agg(
-                            json_build_object(
-                                'id', qo.id,
-                                'question_id', qo.question_id,
-                                'content', qo.content,
-                                'is_correct', qo.is_correct
-                            )
-                        )
-                        FROM quiz_options qo
-                        WHERE qo.question_id = qq.id
-                    )
-                )
-            ), '[]') AS questions
-        FROM quizzes q
-        JOIN quiz_questions qq ON qq.quiz_id = q.id
-        WHERE q.created_by = $1
-        GROUP BY q.id, q.title, q.description, q.difficulty_level, q.time_limit, q.created_by;
+   SELECT q.id, q.title, q.description, q.difficulty_level, q.created_by, q.time_limit
+	FROM quizzes q
+	WHERE q.created_by = $1
+	ORDER BY q.created_at DESC;
     `
 
 	err = q.DB.QueryRow(query, userUUID).Scan(
@@ -149,18 +122,13 @@ func (q *QuizQueries) GetQuizByUserId(userID string) (*models.Quiz, error) {
 		&quiz.Title,
 		&quiz.Description,
 		&quiz.Difficulty,
-		&quiz.TimeLimit,
 		&quiz.CreatedBy,
-		&questionsJSON,
+		&quiz.TimeLimit,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, err
-	}
-
-	if err := json.Unmarshal(questionsJSON, &quiz.Questions); err != nil {
 		return nil, err
 	}
 
