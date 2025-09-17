@@ -102,8 +102,8 @@ func (q *QuizQueries) InsertOptionsBulk(questionIDs []string, questions []models
 	return nil
 }
 
-func (q *QuizQueries) GetQuizByUserId(userID string) (*models.Quiz, error) {
-	var quiz models.Quiz
+func (q *QuizQueries) GetQuizByUserId(userID string) ([]*models.Quiz, error) {
+	var quizzes []*models.Quiz
 
 	userUUID, err := uuid.Parse(userID)
 	if err != nil {
@@ -111,28 +111,41 @@ func (q *QuizQueries) GetQuizByUserId(userID string) (*models.Quiz, error) {
 	}
 
 	query := `
-   SELECT q.id, q.title, q.description, q.difficulty_level, q.created_by, q.time_limit
-	FROM quizzes q
-	WHERE q.created_by = $1
-	ORDER BY q.created_at DESC;
-    `
+		SELECT q.id, q.title, q.description, q.difficulty_level, q.created_by, q.time_limit,
+			COALESCE((SELECT COUNT(*) FROM quiz_questions qq WHERE qq.quiz_id = q.id), 0) as total_questions
+		FROM quizzes q
+		WHERE q.created_by = $1
+		ORDER BY q.created_at DESC;
+	`
 
-	err = q.DB.QueryRow(query, userUUID).Scan(
-		&quiz.ID,
-		&quiz.Title,
-		&quiz.Description,
-		&quiz.Difficulty,
-		&quiz.CreatedBy,
-		&quiz.TimeLimit,
-	)
+	rows, err := q.DB.Query(query, userUUID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var quiz models.Quiz
+		err := rows.Scan(
+			&quiz.ID,
+			&quiz.Title,
+			&quiz.Description,
+			&quiz.Difficulty,
+			&quiz.CreatedBy,
+			&quiz.TimeLimit,
+			&quiz.TotalQuestions,
+		)
+		if err != nil {
+			return nil, err
 		}
+		quizzes = append(quizzes, &quiz)
+	}
+
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	return &quiz, nil
+	return quizzes, nil
 }
 
 func (q *QuizQueries) GetQuizzesFromFollowing(userID string) ([]models.Quiz, error) {
