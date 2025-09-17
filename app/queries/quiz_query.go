@@ -111,7 +111,7 @@ func (q *QuizQueries) GetQuizByUserId(userID string) ([]*models.Quiz, error) {
 	}
 
 	query := `
-		SELECT q.id, q.title, q.description, q.difficulty_level, q.created_by, q.time_limit,
+		SELECT q.id, q.title, q.description, q.difficulty_level, q.created_by, q.time_limit, q.created_at,
 			COALESCE((SELECT COUNT(*) FROM quiz_questions qq WHERE qq.quiz_id = q.id), 0) as total_questions
 		FROM quizzes q
 		WHERE q.created_by = $1
@@ -133,6 +133,7 @@ func (q *QuizQueries) GetQuizByUserId(userID string) ([]*models.Quiz, error) {
 			&quiz.Difficulty,
 			&quiz.CreatedBy,
 			&quiz.TimeLimit,
+			&quiz.CreatedAt,
 			&quiz.TotalQuestions,
 		)
 		if err != nil {
