@@ -11,6 +11,7 @@ import (
 	"github.com/gilanghuda/backend-Quizzo/pkg/utils"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 func UploadAndGenerateQuiz(c *fiber.Ctx) error {
@@ -219,9 +220,13 @@ func GetAttemptHistory(c *fiber.Ctx) error {
 	}
 
 	quizIDParam := c.Query("quiz_id")
-	var quizID *string
+	var quizID *uuid.UUID
 	if quizIDParam != "" {
-		quizID = &quizIDParam
+		parsedID, err := uuid.Parse(quizIDParam)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid quiz_id"})
+		}
+		quizID = &parsedID
 	}
 
 	limit := 50

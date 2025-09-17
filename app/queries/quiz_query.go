@@ -222,7 +222,7 @@ func (q *QuizQueries) EvaluateQuizAttempt(quizID string, answers map[string]stri
 	return correct, len(answers), nil
 }
 
-func (q *QuizQueries) GetAttemptsForUser(userID string, quizID *string, limit int) ([]models.Attempt, error) {
+func (q *QuizQueries) GetAttemptsForUser(userID string, quizID *uuid.UUID, limit int) ([]models.Attempt, error) {
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, err

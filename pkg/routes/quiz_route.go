@@ -10,6 +10,7 @@ func RegisterQuizRoutes(app *fiber.App) {
 	app.Post("/quizzes", controllers.UploadAndGenerateQuiz)
 	app.Get("/quiz/leaderboard/users", controllers.GetUserLeaderboard)
 	app.Get("/quiz/leaderboard/study-groups", controllers.GetStudyGroupLeaderboard)
+	app.Get("/quizes/:id", controllers.GetQuizDetail)
 
 	quiz := app.Group("/quiz", middleware.JWTProtected())
 	quiz.Post("/upload", controllers.UploadAndGenerateQuiz)
@@ -17,5 +18,4 @@ func RegisterQuizRoutes(app *fiber.App) {
 	quiz.Get("/feed", controllers.GetFeed)
 	quiz.Post("/attempt", controllers.AttemptQuiz)
 	quiz.Get("/attempts", controllers.GetAttemptHistory)
-	quiz.Get(":id", controllers.GetQuizDetail)
 }
