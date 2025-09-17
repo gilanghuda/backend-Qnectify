@@ -16,4 +16,6 @@ func RegisterUserRoutes(app *fiber.App) {
 	user.Post("/follow/:id", controllers.FollowUser)
 	user.Post("/unfollow/:id", controllers.UnfollowUser)
 	user.Get("/recommendations", controllers.RecommendUsers)
+
+	app.Get("/users/:id", controllers.GetUserByID)
 }

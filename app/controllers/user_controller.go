@@ -87,3 +87,23 @@ func RecommendUsers(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"recommendations": res})
 }
+
+func GetUserByID(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user id required"})
+	}
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid user id"})
+	}
+
+	userQueries := queries.UserQueries{DB: database.DB}
+	user, err := userQueries.GetUserByID(id)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+	}
+
+	user.PasswordHash = ""
+	return c.Status(fiber.StatusOK).JSON(user)
+}
