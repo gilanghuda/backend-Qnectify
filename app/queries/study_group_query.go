@@ -108,3 +108,32 @@ func (q *StudyGroupQueries) JoinStudyGroup(groupID, userID uuid.UUID) error {
 	}
 	return nil
 }
+
+func (q *StudyGroupQueries) GetAllStudyGroups(limit, offset int) ([]models.StudyGroup, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `SELECT id, name, description, invite_code, member_count, max_member, is_private, created_by, created_at, updated_at FROM study_group ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+	rows, err := q.DB.Query(query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := []models.StudyGroup{}
+	for rows.Next() {
+		var sg models.StudyGroup
+		if err := rows.Scan(&sg.ID, &sg.Name, &sg.Description, &sg.InviteCode, &sg.MemberCount, &sg.MaxMember, &sg.IsPrivate, &sg.CreatedBy, &sg.CreatedAt, &sg.UpdatedAt); err != nil {
+			return nil, err
+		}
+		res = append(res, sg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return res, nil
+}

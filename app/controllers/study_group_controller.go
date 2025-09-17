@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"strconv"
+
 	"github.com/gilanghuda/backend-Quizzo/app/models"
 	"github.com/gilanghuda/backend-Quizzo/app/queries"
 	"github.com/gilanghuda/backend-Quizzo/pkg/database"
@@ -128,4 +130,26 @@ func JoinStudyGroup(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to join study group"})
 	}
 	return c.JSON(fiber.Map{"message": "joined"})
+}
+
+func GetAllStudyGroups(c *fiber.Ctx) error {
+	limit := 20
+	offset := 0
+	if l := c.Query("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil {
+			limit = v
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil {
+			offset = v
+		}
+	}
+
+	q := queries.StudyGroupQueries{DB: database.DB}
+	res, err := q.GetAllStudyGroups(limit, offset)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get study groups"})
+	}
+	return c.JSON(fiber.Map{"study_groups": res})
 }

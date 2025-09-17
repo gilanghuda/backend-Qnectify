@@ -7,11 +7,14 @@ import (
 )
 
 func RegisterStudyGroupRoutes(app *fiber.App) {
+	app.Get("/study-groups", controllers.GetAllStudyGroups)
+
 	studyGroup := app.Group("/study-group", middleware.JWTProtected())
 	studyGroup.Post("/create", controllers.CreateStudyGroup)
 	studyGroup.Get("/:id", controllers.GetStudyGroup)
 	studyGroup.Put("/:id", controllers.UpdateStudyGroup)
 	studyGroup.Delete("/:id", controllers.DeleteStudyGroup)
 	studyGroup.Post("/join/:id", controllers.JoinStudyGroup)
+	studyGroup.Get("/get-all-studygroup", controllers.GetAllStudyGroups)
 
 }
