@@ -153,3 +153,31 @@ func GetAllStudyGroups(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"study_groups": res})
 }
+
+func GetUserStudyGroups(c *fiber.Ctx) error {
+	userID, err := utils.ExtractUserID(c)
+	if err != nil {
+		println("Error extracting user ID:", err.Error())
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	limit := 20
+	offset := 0
+	if l := c.Query("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil {
+			limit = v
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil {
+			offset = v
+		}
+	}
+
+	q := queries.StudyGroupQueries{DB: database.DB}
+	res, err := q.GetStudyGroupsForUser(userID, limit, offset)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get study groups for user"})
+	}
+	return c.JSON(fiber.Map{"study_groups": res})
+}
