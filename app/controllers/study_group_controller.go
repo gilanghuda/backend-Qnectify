@@ -181,3 +181,23 @@ func GetUserStudyGroups(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"study_groups": res})
 }
+
+func GetStudyGroupDetail(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "group id required"})
+	}
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid group id"})
+	}
+	q := queries.StudyGroupQueries{DB: database.DB}
+	detail, err := q.GetStudyGroupDetail(id)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get study group detail"})
+	}
+	if detail == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "study group not found"})
+	}
+	return c.JSON(fiber.Map{"detail": detail})
+}

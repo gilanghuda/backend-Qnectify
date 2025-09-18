@@ -17,8 +17,17 @@ type UserQueries struct {
 func (q *UserQueries) GetUserByID(id uuid.UUID) (models.User, error) {
 	user := models.User{}
 
-	query := `SELECT uid, username, user_role, email, password, exp_point, image_url, created_at, updated_at
-			  FROM users WHERE uid = $1`
+	query := `SELECT u.uid, u.username, u.user_role, u.email, u.password, u.exp_point, u.image_url, u.created_at, u.updated_at,
+		COALESCE(followers.count, 0) as follower_count,
+		COALESCE(following.count, 0) as following_count
+		FROM users u
+		LEFT JOIN (
+			SELECT following as user_id, COUNT(*) as count FROM socials GROUP BY following
+		) followers ON followers.user_id = u.uid
+		LEFT JOIN (
+			SELECT follower_id as user_id, COUNT(*) as count FROM socials GROUP BY follower_id
+		) following ON following.user_id = u.uid
+		WHERE u.uid = $1`
 
 	err := q.DB.QueryRow(query, id).Scan(
 		&user.ID,
@@ -30,6 +39,8 @@ func (q *UserQueries) GetUserByID(id uuid.UUID) (models.User, error) {
 		&user.ImageURL,
 		&user.CreatedAt,
 		&user.UpdatedAt,
+		&user.FollowerCount,
+		&user.FollowingCount,
 	)
 
 	if err != nil {

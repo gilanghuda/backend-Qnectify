@@ -172,3 +172,76 @@ func (q *StudyGroupQueries) GetStudyGroupsForUser(userID uuid.UUID, limit, offse
 	}
 	return res, nil
 }
+
+func (q *StudyGroupQueries) GetStudyGroupDetail(groupID uuid.UUID) (*models.StudyGroupDetail, error) {
+	// fetch group
+	group, err := q.GetStudyGroup(groupID)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, nil
+	}
+
+	// fetch members
+	membersQuery := `
+	SELECT u.uid, u.username, u.image_url, sgm.joined_at
+	FROM study_group_member sgm
+	JOIN users u ON u.uid = sgm.user_id
+	WHERE sgm.group_id = $1
+	ORDER BY sgm.joined_at ASC
+	`
+	rows, err := q.DB.Query(membersQuery, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := []models.StudyGroupMember{}
+	for rows.Next() {
+		var m models.StudyGroupMember
+		if err := rows.Scan(&m.UserID, &m.Username, &m.ImageURL, &m.JoinedAt); err != nil {
+			return nil, err
+		}
+		members = append(members, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// fetch leaderboard: sum of scores per user in this group
+	leaderQuery := `
+	SELECT u.uid, u.username, u.image_url, COALESCE(SUM(a.score),0) as total_score
+	FROM study_group_member sgm
+	JOIN users u ON u.uid = sgm.user_id
+	LEFT JOIN attempts_quiz a ON a.user_id = sgm.user_id
+	WHERE sgm.group_id = $1
+	GROUP BY u.uid, u.username, u.image_url
+	ORDER BY total_score DESC
+	LIMIT 50
+	`
+	lrows, err := q.DB.Query(leaderQuery, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer lrows.Close()
+
+	leaderboard := []models.StudyGroupMemberScore{}
+	for lrows.Next() {
+		var e models.StudyGroupMemberScore
+		if err := lrows.Scan(&e.UserID, &e.Username, &e.ImageURL, &e.TotalScore); err != nil {
+			return nil, err
+		}
+		leaderboard = append(leaderboard, e)
+	}
+	if err := lrows.Err(); err != nil {
+		return nil, err
+	}
+
+	detail := &models.StudyGroupDetail{
+		Group:       *group,
+		Members:     members,
+		Leaderboard: leaderboard,
+	}
+	return detail, nil
+}
