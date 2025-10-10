@@ -9,6 +9,7 @@ import (
 func RegisterUserRoutes(app *fiber.App) {
 	app.Post("/signup", controllers.UserSignUp)
 	app.Post("/signin", controllers.UserSignIn)
+	app.Post("/signin/google", controllers.UserSignInGoogle)
 	app.Post("/logout", controllers.UserLogout)
 
 	user := app.Group("/user", middleware.JWTProtected())

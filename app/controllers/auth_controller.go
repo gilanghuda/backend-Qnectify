@@ -1,8 +1,11 @@
 package controllers
 
 import (
+	"context"
+	"database/sql"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gilanghuda/backend-Quizzo/app/models"
@@ -150,6 +153,76 @@ func UserSignIn(c *fiber.Ctx) error {
 		},
 		"token": tokenString,
 	})
+}
+
+func UserSignInGoogle(c *fiber.Ctx) error {
+	var req struct {
+		GoogleToken string `json:"id_token"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+	}
+
+	if req.GoogleToken == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "google_token is required for this endpoint"})
+	}
+
+	email, err := utils.ValidateGoogleIDToken(context.Background(), req.GoogleToken)
+	if err != nil {
+		log.Printf("google token validation failed: %v", err)
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid google token"})
+	}
+
+	username := email
+	if parts := strings.Split(email, "@"); len(parts) > 0 {
+		username = parts[0]
+	}
+
+	uq := queries.UserQueries{DB: database.DB}
+	user, err := uq.GetUserByEmail(email)
+	if err != nil {
+		if err.Error() == "user not found" {
+			newUser := models.User{
+				ID:           uuid.New(),
+				Username:     username,
+				Email:        email,
+				PasswordHash: "",
+				ExpPoints:    "0",
+				UserRole:     "user",
+				ImageURL:     sql.NullString{Valid: false},
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+			}
+			if err := uq.CreateUser(&newUser); err != nil {
+				log.Printf("failed to create user: %v", err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create user"})
+			}
+			user = newUser
+		} else {
+			log.Printf("GetUserByEmail error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get user"})
+		}
+	}
+
+	user.PasswordHash = ""
+
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		secret = "secret"
+	}
+	claims := jwt.MapClaims{
+		"user_id": user.ID.String(),
+		"exp":     time.Now().Add(72 * time.Hour).Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, err := tok.SignedString([]byte(secret))
+	if err != nil {
+		log.Printf("failed to sign token: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create token"})
+	}
+
+	return c.JSON(fiber.Map{"token": tokenStr, "user": user})
 }
 
 func UserLogout(c *fiber.Ctx) error {
