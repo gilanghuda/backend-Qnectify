@@ -18,6 +18,7 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 	numQuestionsStr := c.FormValue("num_questions")
 	difficulty := c.FormValue("difficulty")
 	description := c.FormValue("description")
+	timeLimitStr := c.FormValue("time_limit")
 
 	if numQuestionsStr == "" || difficulty == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -26,6 +27,15 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 	}
 
 	numQuestions, _ := strconv.Atoi(numQuestionsStr)
+
+	var timeLimit *int
+	if timeLimitStr != "" {
+		if tl, err := strconv.Atoi(timeLimitStr); err == nil {
+			timeLimit = &tl
+		} else {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid time_limit"})
+		}
+	}
 
 	claims := c.Locals("user")
 	var mapClaims map[string]interface{}
@@ -75,6 +85,8 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 	if !ok {
 		qptr, ok2 := quizIntf.(*models.Quiz)
 		if !ok2 || qptr == nil {
+			println("Type assertion to *models.Quiz failed or is nil", qptr)
+			println("quizIntf type:", fmt.Sprintf("%T", quizIntf))
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "invalid quiz format"})
 		}
 		quiz = *qptr
@@ -98,7 +110,7 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 		}
 	}()
 	quizQueries := queries.QuizQueries{DB: database.DB}
-	quizID, err := quizQueries.InsertQuiz(quiz, userID, description)
+	quizID, err := quizQueries.InsertQuiz(quiz, userID, description, timeLimit)
 	if err != nil {
 		log.Printf("InsertQuiz error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert quiz"})

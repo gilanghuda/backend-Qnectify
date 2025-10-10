@@ -53,6 +53,7 @@ func UserSignUp(c *fiber.Ctx) error {
 	userQueries := queries.UserQueries{DB: database.DB}
 	_, err := userQueries.GetUserByEmail(signUp.Email)
 	if err == nil {
+		log.Println("Attempt to register with existing email:", signUp.Email)
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "Email already registered",
 		})

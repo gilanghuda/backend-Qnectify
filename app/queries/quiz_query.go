@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/gilanghuda/backend-Quizzo/app/models"
@@ -14,7 +15,7 @@ type QuizQueries struct {
 	DB *sql.DB
 }
 
-func (q *QuizQueries) InsertQuiz(quiz models.Quiz, createdBy string, description string) (string, error) {
+func (q *QuizQueries) InsertQuiz(quiz models.Quiz, createdBy string, description string, timeLimit *int) (string, error) {
 	userID, err := uuid.Parse(createdBy)
 	if err != nil {
 		return "", err
@@ -22,7 +23,15 @@ func (q *QuizQueries) InsertQuiz(quiz models.Quiz, createdBy string, description
 
 	var quizID string
 	query := `INSERT INTO quizzes (title, description, difficulty_level, time_limit, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`
-	if err := q.DB.QueryRow(query, quiz.Title, description, quiz.Difficulty, nil, userID).Scan(&quizID); err != nil {
+
+	var tl interface{}
+	if timeLimit != nil {
+		tl = *timeLimit
+	} else {
+		tl = nil
+	}
+
+	if err := q.DB.QueryRow(query, quiz.Title, description, quiz.Difficulty, tl, userID).Scan(&quizID); err != nil {
 		return "", err
 	}
 	return quizID, nil
@@ -36,13 +45,23 @@ func (q *QuizQueries) InsertQuestionsBulk(quizID string, questions []models.Ques
 	var args []interface{}
 	vals := make([]string, 0, len(questions))
 	idx := 1
-	for _, q := range questions {
-		vals = append(vals, fmt.Sprintf("($%d,$%d)", idx, idx+1))
-		args = append(args, quizID, q.Question)
-		idx += 2
+	for _, qn := range questions {
+		// safely get Explanation field if present
+		expl := ""
+		rv := reflect.ValueOf(qn)
+		if rv.Kind() == reflect.Struct {
+			f := rv.FieldByName("Explanation")
+			if f.IsValid() && f.Kind() == reflect.String {
+				expl = f.String()
+			}
+		}
+
+		vals = append(vals, fmt.Sprintf("($%d,$%d,$%d)", idx, idx+1, idx+2))
+		args = append(args, quizID, qn.Question, expl)
+		idx += 3
 	}
 
-	query := fmt.Sprintf("INSERT INTO quiz_questions (quiz_id, question_text) VALUES %s RETURNING id", strings.Join(vals, ","))
+	query := fmt.Sprintf("INSERT INTO quiz_questions (quiz_id, question_text, explanation) VALUES %s RETURNING id", strings.Join(vals, ","))
 	rows, err := q.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -281,6 +300,7 @@ func (q *QuizQueries) GetQuizByID(quizID string) (*models.Quiz, error) {
                     'id', qq.id,
                     'quiz_id', qq.quiz_id,
                     'question_text', qq.question_text,
+                    'explanation', qq.explanation,
                     'options', (
                         SELECT json_agg(
                             json_build_object(

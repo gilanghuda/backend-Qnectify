@@ -80,13 +80,12 @@ func (q *UserQueries) GetUserByEmail(email string) (models.User, error) {
 }
 
 func (q *UserQueries) CreateUser(u *models.User) error {
-	query := `INSERT INTO users (uid, username, user_role, email, password, created_at, updated_at)
-			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	query := `INSERT INTO users (uid, username, email, password, created_at, updated_at)
+			  VALUES ($1, $2, $3, $4, $5, $6)`
 
 	_, err := q.DB.Exec(query,
 		u.ID,
 		u.Username,
-		u.UserRole,
 		u.Email,
 		u.PasswordHash,
 		u.CreatedAt,
@@ -94,6 +93,7 @@ func (q *UserQueries) CreateUser(u *models.User) error {
 	)
 
 	if err != nil {
+		log.Println("Error creating user:", err)
 		return errors.New("unable to create user, DB error")
 	}
 

@@ -39,6 +39,7 @@ func GenerateQuiz(file io.Reader, question_count int, difficulty string) (interf
 
 Aturan:
 - Buat %d soal pilihan ganda dengan tingkat kesulitan %s.
+- Untuk setiap soal sertakan "explanation" (pembahasan singkat) yang menjelaskan jawaban yang benar.
 - Judul ("title") harus dihasilkan secara otomatis berdasarkan isi materi.
 - JANGAN sertakan teks pengantar, penjelasan, atau markdown format seperti %s.
 - Strukturnya harus seperti ini:
@@ -48,7 +49,8 @@ Aturan:
     {
       "question": "Isi pertanyaan...",
       "options": ["A. Opsi 1", "B. Opsi 2", "C. Opsi 3", "D. Opsi 4"],
-      "correct_answer": "A"
+      "correct_answer": "A",
+      "explanation": "Penjelasan singkat mengapa jawaban benar"
     }
   ]
 }
@@ -115,6 +117,7 @@ Aturan:
 			Question      string   `json:"question"`
 			Options       []string `json:"options"`
 			CorrectAnswer string   `json:"correct_answer"`
+			Explanation   string   `json:"explanation"`
 		} `json:"questions"`
 	}
 
@@ -133,8 +136,9 @@ Aturan:
 
 	for _, q := range aiResp.Questions {
 		mq := models.Question{
-			Question: q.Question,
-			Options:  []models.Option{},
+			Question:    q.Question,
+			Explanation: q.Explanation,
+			Options:     []models.Option{},
 		}
 		for _, opt := range q.Options {
 			label := ""
