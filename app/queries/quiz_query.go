@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/gilanghuda/backend-Quizzo/app/models"
 	"github.com/google/uuid"
@@ -489,4 +490,60 @@ func (q *QuizQueries) HasUserAttemptedQuiz(quizID string, userID string) (bool, 
 		return false, err
 	}
 	return cnt > 0, nil
+}
+
+func (q *QuizQueries) GetFeedWithLikes(userID string) ([]map[string]interface{}, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	query := `
+SELECT q.id, q.title, q.description, q.difficulty_level, q.created_by,
+	COALESCE((SELECT COUNT(*) FROM attempts_quiz a WHERE a.quiz_id = q.id), 0) AS attempts_count,
+	COALESCE((SELECT COUNT(*) FROM likes l WHERE l.quiz_id = q.id), 0) AS likes_count,
+	EXISTS(SELECT 1 FROM likes l2 WHERE l2.quiz_id = q.id AND l2.liked_by = $1) AS is_likedbyme,
+	q.created_at
+FROM quizzes q
+JOIN socials s ON s.following = q.created_by
+WHERE s.follower_id = $1
+ORDER BY q.created_at DESC
+LIMIT 10
+`
+
+	rows, err := q.DB.Query(query, uid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		var title, description, difficulty string
+		var createdBy uuid.UUID
+		var attemptsCount, likesCount int
+		var isLiked bool
+		var createdAt time.Time
+
+		if err := rows.Scan(&id, &title, &description, &difficulty, &createdBy, &attemptsCount, &likesCount, &isLiked, &createdAt); err != nil {
+			return nil, err
+		}
+
+		res = append(res, map[string]interface{}{
+			"id":           id.String(),
+			"title":        title,
+			"description":  description,
+			"difficulty":   difficulty,
+			"created_by":   createdBy.String(),
+			"attempts":     attemptsCount,
+			"likes_count":  likesCount,
+			"is_likedbyme": isLiked,
+			"created_at":   createdAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return res, nil
 }

@@ -174,9 +174,9 @@ func GetFeed(c *fiber.Ctx) error {
 	}
 
 	q := queries.QuizQueries{DB: database.DB}
-	feed, err := q.GetQuizzesFromFollowing(userID.String())
+	feed, err := q.GetFeedWithLikes(userID.String())
 	if err != nil {
-		log.Printf("GetQuizzesFromFollowing error: %v", err)
+		log.Printf("GetFeedWithLikes error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get feed"})
 	}
 
