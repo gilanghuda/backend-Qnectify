@@ -3,6 +3,7 @@ package queries
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 
 	"github.com/gilanghuda/backend-Quizzo/app/models"
@@ -17,6 +18,7 @@ type UserQueries struct {
 func (q *UserQueries) GetUserByID(id uuid.UUID) (models.User, error) {
 	user := models.User{}
 
+	var expPoint sql.NullString
 	query := `SELECT u.uid, u.username, u.user_role, u.email, u.password, u.exp_point, u.image_url, u.created_at, u.updated_at,
 		COALESCE(followers.count, 0) as follower_count,
 		COALESCE(following.count, 0) as following_count
@@ -35,7 +37,7 @@ func (q *UserQueries) GetUserByID(id uuid.UUID) (models.User, error) {
 		&user.UserRole,
 		&user.Email,
 		&user.PasswordHash,
-		&user.ExpPoints,
+		&expPoint,
 		&user.ImageURL,
 		&user.CreatedAt,
 		&user.UpdatedAt,
@@ -49,6 +51,19 @@ func (q *UserQueries) GetUserByID(id uuid.UUID) (models.User, error) {
 			return user, errors.New("user not found")
 		}
 		return user, errors.New("unable to get user, DB error")
+	}
+
+	// set ExpPoints from DB exp_point if present
+	if expPoint.Valid {
+		user.ExpPoints = expPoint.String
+	} else {
+		user.ExpPoints = "0"
+	}
+
+	// compute total score from attempts_quiz and store in ExpPoints (override DB value)
+	var totalScore sql.NullInt64
+	if err := q.DB.QueryRow(`SELECT COALESCE(SUM(score),0) FROM attempts_quiz WHERE user_id = $1`, id).Scan(&totalScore); err == nil {
+		user.ExpPoints = fmt.Sprintf("%d", totalScore.Int64)
 	}
 
 	return user, nil
