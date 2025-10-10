@@ -46,7 +46,6 @@ func (q *QuizQueries) InsertQuestionsBulk(quizID string, questions []models.Ques
 	vals := make([]string, 0, len(questions))
 	idx := 1
 	for _, qn := range questions {
-		// safely get Explanation field if present
 		expl := ""
 		rv := reflect.ValueOf(qn)
 		if rv.Kind() == reflect.Struct {
@@ -206,24 +205,41 @@ func (q *QuizQueries) GetQuizzesFromFollowing(userID string) ([]models.Quiz, err
 	return res, nil
 }
 
-func (q *QuizQueries) InsertQuizAttempt(quizID, userID string, score, totalQuestions int, isCompleted bool) (string, error) {
+func (q *QuizQueries) InsertQuizAttempt(quizID, userID string, score, totalQuestions int, isCompleted bool, answers map[string]string) (string, error) {
 	var attemptID string
 	query := `INSERT INTO attempts_quiz (quiz_id, user_id, score, total_questions, is_completed) VALUES ($1, $2, $3, $4, $5) RETURNING id`
 	if err := q.DB.QueryRow(query, quizID, userID, score, totalQuestions, isCompleted).Scan(&attemptID); err != nil {
 		return "", err
 	}
+
+	if len(answers) > 0 {
+		var args []interface{}
+		vals := make([]string, 0, len(answers))
+		idx := 1
+		for qid, oid := range answers {
+			vals = append(vals, fmt.Sprintf("($%d,$%d,$%d)", idx, idx+1, idx+2))
+			args = append(args, attemptID, qid, oid)
+			idx += 3
+		}
+		ansQuery := fmt.Sprintf("INSERT INTO attempts_quiz_answer (attempt_id, question_id, selected_option_id) VALUES %s", strings.Join(vals, ","))
+		if _, err := q.DB.Exec(ansQuery, args...); err != nil {
+			return attemptID, err
+		}
+	}
+
 	return attemptID, nil
 }
 
 func (q *QuizQueries) EvaluateQuizAttempt(quizID string, answers map[string]string) (int, int, error) {
-	if len(answers) == 0 {
-		var cnt int
-		err := q.DB.QueryRow(`SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = $1`, quizID).Scan(&cnt)
-		if err != nil {
-			return 0, 0, err
-		}
-		return 0, cnt, nil
+	var totalQuestions int
+	if err := q.DB.QueryRow(`SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = $1`, quizID).Scan(&totalQuestions); err != nil {
+		return 0, 0, err
 	}
+
+	if len(answers) == 0 {
+		return 0, totalQuestions, nil
+	}
+
 	correct := 0
 	for qid, oid := range answers {
 		var isCorrect bool
@@ -238,7 +254,7 @@ func (q *QuizQueries) EvaluateQuizAttempt(quizID string, answers map[string]stri
 			correct++
 		}
 	}
-	return correct, len(answers), nil
+	return correct, totalQuestions, nil
 }
 
 func (q *QuizQueries) GetAttemptsForUser(userID string, quizID *uuid.UUID, limit int) ([]models.Attempt, error) {
@@ -270,12 +286,71 @@ func (q *QuizQueries) GetAttemptsForUser(userID string, quizID *uuid.UUID, limit
 		if err := rows.Scan(&a.ID, &a.QuizID, &a.UserID, &a.Score, &a.TotalQuestions, &a.SubmittedAt, &a.IsCompleted); err != nil {
 			return nil, err
 		}
+		if a.TotalQuestions == 0 {
+			var cnt int
+			if err := q.DB.QueryRow(`SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = $1`, a.QuizID).Scan(&cnt); err == nil {
+				a.TotalQuestions = cnt
+			}
+		}
 		res = append(res, a)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return res, nil
+}
+
+func (q *QuizQueries) GetAttemptDetail(attemptID string) (*models.AttemptDetail, error) {
+	var detail models.AttemptDetail
+	var a models.Attempt
+	if err := q.DB.QueryRow(`SELECT id, quiz_id, user_id, score, total_questions, submitted_at, is_completed FROM attempts_quiz WHERE id = $1`, attemptID).Scan(&a.ID, &a.QuizID, &a.UserID, &a.Score, &a.TotalQuestions, &a.SubmittedAt, &a.IsCompleted); err != nil {
+		return nil, err
+	}
+
+	quiz, err := q.GetQuizByID(a.QuizID.String())
+	if err != nil {
+		return nil, err
+	}
+	if quiz == nil {
+		return nil, fmt.Errorf("quiz not found")
+	}
+
+	rows, err := q.DB.Query(`SELECT question_id, selected_option_id FROM attempts_quiz_answer WHERE attempt_id = $1`, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	answers := []models.AttemptAnswer{}
+	answerMap := map[string]string{}
+	for rows.Next() {
+		var ans models.AttemptAnswer
+		if err := rows.Scan(&ans.QuestionID, &ans.SelectedOptionID); err != nil {
+			return nil, err
+		}
+		answers = append(answers, ans)
+		answerMap[ans.QuestionID.String()] = ans.SelectedOptionID.String()
+	}
+
+	totalCorrect := 0
+	for _, ques := range quiz.Questions {
+		qID := ques.ID.String()
+		if selectedOID, ok := answerMap[qID]; ok {
+			var isCorrect bool
+			if err := q.DB.QueryRow(`SELECT is_correct FROM quiz_options WHERE id = $1`, selectedOID).Scan(&isCorrect); err == nil {
+				if isCorrect {
+					totalCorrect++
+				}
+			}
+		}
+	}
+
+	detail.Attempt = a
+	detail.Quiz = *quiz
+	detail.Answers = answers
+	detail.TotalCorrect = totalCorrect
+
+	return &detail, nil
 }
 
 func (q *QuizQueries) GetQuizByID(quizID string) (*models.Quiz, error) {
@@ -295,19 +370,22 @@ func (q *QuizQueries) GetQuizByID(quizID string) (*models.Quiz, error) {
             q.difficulty_level,
             q.time_limit,
             q.created_by,
+            q.created_at,
             COALESCE(json_agg(
                 json_build_object(
                     'id', qq.id,
                     'quiz_id', qq.quiz_id,
                     'question_text', qq.question_text,
                     'explanation', qq.explanation,
+                    'created_at', qq.created_at,
                     'options', (
                         SELECT json_agg(
                             json_build_object(
                                 'id', qo.id,
                                 'question_id', qo.question_id,
                                 'content', qo.content,
-                                'is_correct', qo.is_correct
+                                'is_correct', qo.is_correct,
+                                'created_at', qo.created_at
                             )
                         )
                         FROM quiz_options qo
@@ -318,7 +396,7 @@ func (q *QuizQueries) GetQuizByID(quizID string) (*models.Quiz, error) {
         FROM quizzes q
         LEFT JOIN quiz_questions qq ON qq.quiz_id = q.id
         WHERE q.id = $1
-        GROUP BY q.id, q.title, q.description, q.difficulty_level, q.time_limit, q.created_by;
+        GROUP BY q.id, q.title, q.description, q.difficulty_level, q.time_limit, q.created_by, q.created_at;
     `
 
 	err = q.DB.QueryRow(query, id).Scan(
@@ -328,6 +406,7 @@ func (q *QuizQueries) GetQuizByID(quizID string) (*models.Quiz, error) {
 		&quiz.Difficulty,
 		&quiz.TimeLimit,
 		&quiz.CreatedBy,
+		&quiz.CreatedAt,
 		&questionsJSON,
 	)
 	if err != nil {
@@ -401,4 +480,13 @@ ORDER BY total_score DESC
 		return nil, err
 	}
 	return res, nil
+}
+
+func (q *QuizQueries) HasUserAttemptedQuiz(quizID string, userID string) (bool, error) {
+	var cnt int
+	query := `SELECT COUNT(*) FROM attempts_quiz WHERE quiz_id = $1 AND user_id = $2`
+	if err := q.DB.QueryRow(query, quizID, userID).Scan(&cnt); err != nil {
+		return false, err
+	}
+	return cnt > 0, nil
 }

@@ -210,13 +210,21 @@ func AttemptQuiz(c *fiber.Ctx) error {
 	}
 
 	q := queries.QuizQueries{DB: database.DB}
+	attempted, err := q.HasUserAttemptedQuiz(req.QuizID, userID)
+	if err != nil {
+		log.Printf("HasUserAttemptedQuiz error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to check previous attempts"})
+	}
+	if attempted {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user already attempted this quiz"})
+	}
 	score, totalQuestions, err := q.EvaluateQuizAttempt(req.QuizID, req.Answers)
 	if err != nil {
 		log.Printf("EvaluateQuizAttempt error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to evaluate attempt"})
 	}
 
-	attemptID, err := q.InsertQuizAttempt(req.QuizID, userID, score, totalQuestions, true)
+	attemptID, err := q.InsertQuizAttempt(req.QuizID, userID, score, totalQuestions, true, req.Answers)
 	if err != nil {
 		log.Printf("InsertQuizAttempt error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save attempt"})
@@ -305,4 +313,91 @@ func GetStudyGroupLeaderboard(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get leaderboard"})
 	}
 	return c.JSON(fiber.Map{"leaderboard": res})
+}
+
+func GetAttemptDetail(c *fiber.Ctx) error {
+	userID, err := utils.ExtractUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	attemptID := c.Params("id")
+	if attemptID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "attempt id is required"})
+	}
+
+	q := queries.QuizQueries{DB: database.DB}
+	detail, err := q.GetAttemptDetail(attemptID)
+	if err != nil {
+		log.Printf("GetAttemptDetail error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get attempt detail"})
+	}
+	if detail == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "attempt not found"})
+	}
+
+	if detail.Attempt.UserID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+	}
+
+	answerMap := map[string]string{}
+	for _, a := range detail.Answers {
+		answerMap[a.QuestionID.String()] = a.SelectedOptionID.String()
+	}
+
+	questionsOut := make([]map[string]string, 0, len(detail.Quiz.Questions))
+	for _, qn := range detail.Quiz.Questions {
+		qID := qn.ID.String()
+		myAnsID := ""
+		if v, ok := answerMap[qID]; ok {
+			myAnsID = v
+		}
+
+		optContent := map[string]string{}
+		correctAnsContent := ""
+		for _, opt := range qn.Options {
+			optContent[opt.ID.String()] = opt.Content
+			if opt.IsCorrect {
+				correctAnsContent = opt.Content
+			}
+		}
+
+		myAnsContent := ""
+		if myAnsID != "" {
+			if c, ok := optContent[myAnsID]; ok {
+				myAnsContent = c
+			}
+		}
+
+		questionsOut = append(questionsOut, map[string]string{
+			"id":             qID,
+			"quiz_id":        qn.QuizID.String(),
+			"question_text":  qn.Question,
+			"my_answer":      myAnsContent,
+			"correct_answer": correctAnsContent,
+			"explanation":    qn.Explanation,
+		})
+	}
+
+	resp := fiber.Map{
+		"attempt": detail.Attempt,
+		"quiz_id": detail.Quiz.ID.String(),
+		"title":   detail.Quiz.Title,
+		"time_limit": func() interface{} {
+			if detail.Quiz.TimeLimit.Valid {
+				return detail.Quiz.TimeLimit.Int64
+			}
+			return nil
+		}(),
+		"total_correct": detail.TotalCorrect,
+		"total_questions": func() int {
+			if detail.Attempt.TotalQuestions > 0 {
+				return detail.Attempt.TotalQuestions
+			}
+			return len(detail.Quiz.Questions)
+		}(),
+		"questions": questionsOut,
+	}
+
+	return c.JSON(resp)
 }
