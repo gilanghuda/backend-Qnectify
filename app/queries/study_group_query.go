@@ -79,6 +79,19 @@ func (q *StudyGroupQueries) GetStudyGroup(id uuid.UUID) (*models.StudyGroup, err
 	return &sg, nil
 }
 
+func (q *StudyGroupQueries) GetStudyGroupByInviteCode(code string) (*models.StudyGroup, error) {
+	query := `SELECT id, name, description, invite_code, member_count, max_member, is_private, created_by, created_at, updated_at FROM study_group WHERE invite_code = $1`
+	var sg models.StudyGroup
+	row := q.DB.QueryRow(query, code)
+	if err := row.Scan(&sg.ID, &sg.Name, &sg.Description, &sg.InviteCode, &sg.MemberCount, &sg.MaxMember, &sg.IsPrivate, &sg.CreatedBy, &sg.CreatedAt, &sg.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &sg, nil
+}
+
 func (q *StudyGroupQueries) UpdateStudyGroup(sg *models.StudyGroup) error {
 	query := `UPDATE study_group SET name=$1, description=$2, max_member=$3, is_private=$4, updated_at=$5 WHERE id=$6`
 	_, err := q.DB.Exec(query, sg.Name, sg.Description, sg.MaxMember, sg.IsPrivate, time.Now(), sg.ID)

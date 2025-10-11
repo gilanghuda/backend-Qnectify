@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"database/sql"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -56,7 +56,7 @@ func UserSignUp(c *fiber.Ctx) error {
 	userQueries := queries.UserQueries{DB: database.DB}
 	_, err := userQueries.GetUserByEmail(signUp.Email)
 	if err == nil {
-		log.Println("Attempt to register with existing email:", signUp.Email)
+		log.Error().Msgf("Attempt to register with existing email: %s", signUp.Email)
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "Email already registered",
 		})
@@ -80,7 +80,7 @@ func UserSignUp(c *fiber.Ctx) error {
 	}
 
 	if err := userQueries.CreateUser(user); err != nil {
-		log.Println("Error creating user:", err)
+		log.Error().Err(err).Msg("Error creating user")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create user",
 		})
@@ -170,7 +170,7 @@ func UserSignInGoogle(c *fiber.Ctx) error {
 
 	email, err := utils.ValidateGoogleIDToken(context.Background(), req.GoogleToken)
 	if err != nil {
-		log.Printf("google token validation failed: %v", err)
+		log.Error().Err(err).Msg("google token validation failed")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid google token"})
 	}
 
@@ -195,12 +195,12 @@ func UserSignInGoogle(c *fiber.Ctx) error {
 				UpdatedAt:    time.Now(),
 			}
 			if err := uq.CreateUser(&newUser); err != nil {
-				log.Printf("failed to create user: %v", err)
+				log.Error().Err(err).Msg("failed to create user")
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create user"})
 			}
 			user = newUser
 		} else {
-			log.Printf("GetUserByEmail error: %v", err)
+			log.Error().Err(err).Msg("GetUserByEmail error")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get user"})
 		}
 	}
@@ -218,7 +218,7 @@ func UserSignInGoogle(c *fiber.Ctx) error {
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenStr, err := tok.SignedString([]byte(secret))
 	if err != nil {
-		log.Printf("failed to sign token: %v", err)
+		log.Error().Err(err).Msg("failed to sign token")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create token"})
 	}
 

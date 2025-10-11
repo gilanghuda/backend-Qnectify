@@ -14,7 +14,7 @@ func RegisterStudyGroupRoutes(app *fiber.App) {
 	studyGroup.Get("/mines", controllers.GetUserStudyGroups)
 	studyGroup.Get("/get-all-studygroup", controllers.GetAllStudyGroups)
 
-	studyGroup.Post("/join/:id", controllers.JoinStudyGroup)
+	studyGroup.Post("/join", controllers.JoinStudyGroup)
 	studyGroup.Get("/:id/detail", controllers.GetStudyGroupDetail)
 	studyGroup.Get("/:id", controllers.GetStudyGroup)
 	studyGroup.Put("/:id", controllers.UpdateStudyGroup)

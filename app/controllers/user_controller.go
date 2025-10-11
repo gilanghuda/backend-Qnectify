@@ -6,9 +6,21 @@ import (
 	"github.com/gilanghuda/backend-Quizzo/pkg/utils"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
+func getReqLogger(c *fiber.Ctx) zerolog.Logger {
+	if l := c.Locals("logger"); l != nil {
+		if rl, ok := l.(zerolog.Logger); ok {
+			return rl
+		}
+	}
+	return log.Logger
+}
+
 func UserProfile(c *fiber.Ctx) error {
+	logger := getReqLogger(c)
 	userID, err := utils.ExtractUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
@@ -17,15 +29,18 @@ func UserProfile(c *fiber.Ctx) error {
 	userQueries := queries.UserQueries{DB: database.DB}
 	user, err := userQueries.GetUserByID(userID)
 	if err != nil {
+		logger.Error().Err(err).Str("user_id", userID.String()).Msg("User not found")
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
 	}
 
 	user.PasswordHash = ""
+	logger.Info().Str("user_id", userID.String()).Msg("user profile retrieved")
 
 	return c.Status(fiber.StatusOK).JSON(user)
 }
 
 func FollowUser(c *fiber.Ctx) error {
+	logger := getReqLogger(c)
 	followerID, err := utils.ExtractUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
@@ -43,13 +58,16 @@ func FollowUser(c *fiber.Ctx) error {
 
 	userQueries := queries.UserQueries{DB: database.DB}
 	if err := userQueries.FollowUser(followerID, targetUUID); err != nil {
+		logger.Error().Err(err).Str("follower_id", followerID.String()).Str("target_id", targetUUID.String()).Msg("FollowUser error")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	logger.Info().Str("follower_id", followerID.String()).Str("target_id", targetUUID.String()).Msg("user followed")
 	return c.JSON(fiber.Map{"message": "followed"})
 }
 
 func UnfollowUser(c *fiber.Ctx) error {
+	logger := getReqLogger(c)
 	followerID, err := utils.ExtractUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
@@ -67,13 +85,16 @@ func UnfollowUser(c *fiber.Ctx) error {
 
 	userQueries := queries.UserQueries{DB: database.DB}
 	if err := userQueries.UnfollowUser(followerID, targetUUID); err != nil {
+		logger.Error().Err(err).Str("follower_id", followerID.String()).Str("target_id", targetUUID.String()).Msg("UnfollowUser error")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	logger.Info().Str("follower_id", followerID.String()).Str("target_id", targetUUID.String()).Msg("user unfollowed")
 	return c.JSON(fiber.Map{"message": "unfollowed"})
 }
 
 func RecommendUsers(c *fiber.Ctx) error {
+	logger := getReqLogger(c)
 	userID, err := utils.ExtractUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
@@ -82,13 +103,16 @@ func RecommendUsers(c *fiber.Ctx) error {
 	uq := queries.UserQueries{DB: database.DB}
 	res, err := uq.GetRecommendedUsers(userID, 5)
 	if err != nil {
+		logger.Error().Err(err).Str("user_id", userID.String()).Msg("GetRecommendedUsers error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get recommendations"})
 	}
 
+	logger.Info().Str("user_id", userID.String()).Int("count", len(res)).Msg("user recommendations retrieved")
 	return c.JSON(fiber.Map{"recommendations": res})
 }
 
 func GetUserByID(c *fiber.Ctx) error {
+	logger := getReqLogger(c)
 	idStr := c.Params("id")
 	if idStr == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user id required"})
@@ -101,9 +125,11 @@ func GetUserByID(c *fiber.Ctx) error {
 	userQueries := queries.UserQueries{DB: database.DB}
 	user, err := userQueries.GetUserByID(id)
 	if err != nil {
+		logger.Error().Err(err).Str("user_id", id.String()).Msg("GetUserByID error")
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
 	}
 
 	user.PasswordHash = ""
+	logger.Info().Str("user_id", id.String()).Msg("user retrieved by id")
 	return c.Status(fiber.StatusOK).JSON(user)
 }

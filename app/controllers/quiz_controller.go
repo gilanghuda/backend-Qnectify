@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 
 	"github.com/gilanghuda/backend-Quizzo/app/models"
@@ -14,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 func UploadAndGenerateQuiz(c *fiber.Ctx) error {
@@ -79,14 +79,14 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 	// to the external service and pass a reader to GenerateQuiz.
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		log.Printf("failed to read uploaded file: %v", err)
+		log.Error().Err(err).Msg("failed to read uploaded file")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to read uploaded file"})
 	}
 
 	// First generate quiz from the uploaded file
 	quizIntf, err := utils.GenerateQuiz(bytes.NewReader(fileBytes), numQuestions, difficulty)
 	if err != nil {
-		log.Printf("Error generating quiz from file: %v", err)
+		log.Error().Err(err).Msg("error generating quiz from file")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fmt.Sprintf("failed to generate quiz: %v", err),
 		})
@@ -110,7 +110,7 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 
 	tx, err := db.Begin()
 	if err != nil {
-		log.Printf("failed to begin tx: %v", err)
+		log.Error().Err(err).Msg("failed to begin tx")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to begin transaction"})
 	}
 
@@ -124,32 +124,37 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 	quizQueries := queries.QuizQueries{DB: database.DB}
 	quizID, err := quizQueries.InsertQuiz(quiz, userID, description, timeLimit)
 	if err != nil {
-		log.Printf("InsertQuiz error: %v", err)
+		log.Error().Err(err).Msg("InsertQuiz error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert quiz"})
 	}
+	log.Info().Str("quiz_id", quizID).Msg("quiz inserted")
 
 	// Use quizID as id_file when saving original PDF
 	if err := utils.SaveFile(quizID, fileHeader.Filename, fileBytes); err != nil {
-		log.Printf("failed to upload original file: %v", err)
+		log.Error().Err(err).Msg("failed to upload original file")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to upload original file"})
 	}
+	log.Info().Str("quiz_id", quizID).Str("filename", fileHeader.Filename).Msg("original file saved")
 
 	questionIDs, err := quizQueries.InsertQuestionsBulk(quizID, quiz.Questions)
 	if err != nil {
-		log.Printf("InsertQuestionsBulk error: %v", err)
+		log.Error().Err(err).Msg("InsertQuestionsBulk error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert questions"})
 	}
+	log.Info().Int("questions_count", len(questionIDs)).Msg("questions inserted")
 
 	if err := quizQueries.InsertOptionsBulk(questionIDs, quiz.Questions); err != nil {
-		log.Printf("InsertOptionsBulk error: %v", err)
+		log.Error().Err(err).Msg("InsertOptionsBulk error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert options"})
 	}
+	log.Info().Msg("options inserted")
 
 	if err := tx.Commit(); err != nil {
-		log.Printf("tx commit error: %v", err)
+		log.Error().Err(err).Msg("tx commit error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to commit transaction"})
 	}
 	committed = true
+	log.Info().Str("quiz_id", quizID).Msg("transaction committed, quiz generation complete")
 
 	return c.JSON(fiber.Map{"quiz_id": quizID, "message": "quiz generated and saved successfully"})
 }
@@ -178,9 +183,10 @@ func GetQuizByUser(c *fiber.Ctx) error {
 	quizQueries := queries.QuizQueries{DB: database.DB}
 	quiz, err := quizQueries.GetQuizByUserId(userID)
 	if err != nil {
-		log.Printf("GetQuizByUserId error: %v", err)
+		log.Error().Err(err).Msg("GetQuizByUserId error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get quiz"})
 	}
+	log.Info().Str("user_id", userID).Msg("retrieved quizzes for user")
 
 	return c.JSON(fiber.Map{"quiz": quiz})
 }
@@ -194,9 +200,10 @@ func GetFeed(c *fiber.Ctx) error {
 	q := queries.QuizQueries{DB: database.DB}
 	feed, err := q.GetFeedWithLikes(userID.String())
 	if err != nil {
-		log.Printf("GetFeedWithLikes error: %v", err)
+		log.Error().Err(err).Msg("GetFeedWithLikes error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get feed"})
 	}
+	log.Info().Str("user_id", userID.String()).Int("feed_count", len(feed)).Msg("feed retrieved")
 
 	return c.JSON(fiber.Map{"feed": feed})
 }
@@ -230,23 +237,25 @@ func AttemptQuiz(c *fiber.Ctx) error {
 	q := queries.QuizQueries{DB: database.DB}
 	attempted, err := q.HasUserAttemptedQuiz(req.QuizID, userID)
 	if err != nil {
-		log.Printf("HasUserAttemptedQuiz error: %v", err)
+		log.Error().Err(err).Msg("HasUserAttemptedQuiz error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to check previous attempts"})
 	}
 	if attempted {
+		log.Info().Str("user_id", userID).Str("quiz_id", req.QuizID).Msg("user already attempted quiz")
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user already attempted this quiz"})
 	}
 	score, totalQuestions, err := q.EvaluateQuizAttempt(req.QuizID, req.Answers)
 	if err != nil {
-		log.Printf("EvaluateQuizAttempt error: %v", err)
+		log.Error().Err(err).Msg("EvaluateQuizAttempt error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to evaluate attempt"})
 	}
 
 	attemptID, err := q.InsertQuizAttempt(req.QuizID, userID, score, totalQuestions, true, req.Answers)
 	if err != nil {
-		log.Printf("InsertQuizAttempt error: %v", err)
+		log.Error().Err(err).Msg("InsertQuizAttempt error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save attempt"})
 	}
+	log.Info().Str("attempt_id", attemptID).Int("score", score).Int("total_questions", totalQuestions).Msg("quiz attempt recorded")
 
 	return c.JSON(fiber.Map{"attempt_id": attemptID, "score": score, "total_questions": totalQuestions})
 }
@@ -277,9 +286,10 @@ func GetAttemptHistory(c *fiber.Ctx) error {
 	q := queries.QuizQueries{DB: database.DB}
 	attempts, err := q.GetAttemptsForUser(userID.String(), quizID, limit)
 	if err != nil {
-		log.Printf("GetAttemptsForUser error: %v", err)
+		log.Error().Err(err).Msg("GetAttemptsForUser error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get attempts"})
 	}
+	log.Info().Str("user_id", userID.String()).Int("count", len(attempts)).Msg("attempt history retrieved")
 
 	return c.JSON(fiber.Map{"attempts": attempts})
 }
@@ -292,12 +302,14 @@ func GetQuizDetail(c *fiber.Ctx) error {
 	q := queries.QuizQueries{DB: database.DB}
 	quiz, err := q.GetQuizByID(id)
 	if err != nil {
-		log.Printf("GetQuizByID error: %v", err)
+		log.Error().Err(err).Msg("GetQuizByID error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get quiz"})
 	}
 	if quiz == nil {
+		log.Info().Str("quiz_id", id).Msg("quiz not found")
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "quiz not found"})
 	}
+	log.Info().Str("quiz_id", id).Msg("quiz detail retrieved")
 	return c.JSON(fiber.Map{"quiz": quiz})
 }
 
@@ -311,7 +323,7 @@ func GetUserLeaderboard(c *fiber.Ctx) error {
 	q := queries.QuizQueries{DB: database.DB}
 	res, err := q.GetUserLeaderboard(limit)
 	if err != nil {
-		log.Printf("GetUserLeaderboard error: %v", err)
+		log.Error().Err(err).Msg("GetUserLeaderboard error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get leaderboard"})
 	}
 	return c.JSON(fiber.Map{"leaderboard": res})
@@ -327,7 +339,7 @@ func GetStudyGroupLeaderboard(c *fiber.Ctx) error {
 	q := queries.QuizQueries{DB: database.DB}
 	res, err := q.GetStudyGroupLeaderboard(limit)
 	if err != nil {
-		log.Printf("GetStudyGroupLeaderboard error: %v", err)
+		log.Error().Err(err).Msg("GetStudyGroupLeaderboard error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get leaderboard"})
 	}
 	return c.JSON(fiber.Map{"leaderboard": res})
@@ -428,9 +440,10 @@ func GetQuizFile(c *fiber.Ctx) error {
 
 	data, contentType, err := utils.GetFile(id)
 	if err != nil {
-		log.Printf("GetFile error: %v", err)
+		log.Error().Err(err).Msg("GetFile error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch file"})
 	}
+	log.Info().Str("file_id", id).Msg("file fetched")
 
 	if contentType == "" {
 		contentType = "application/pdf"
@@ -461,7 +474,7 @@ func AddQuizToStudyGroup(c *fiber.Ctx) error {
 	q := queries.QuizQueries{DB: database.DB}
 	quiz, err := q.GetQuizByID(req.QuizID)
 	if err != nil {
-		log.Printf("GetQuizByID error: %v", err)
+		log.Error().Err(err).Msg("GetQuizByID error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch quiz"})
 	}
 	if quiz == nil {
@@ -473,9 +486,10 @@ func AddQuizToStudyGroup(c *fiber.Ctx) error {
 	}
 
 	if err := q.AssignQuizToStudyGroup(req.QuizID, req.StudyGroupID); err != nil {
-		log.Printf("AssignQuizToStudyGroup error: %v", err)
+		log.Error().Err(err).Msg("AssignQuizToStudyGroup error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to assign quiz to study group"})
 	}
+	log.Info().Str("quiz_id", req.QuizID).Str("study_group_id", req.StudyGroupID).Msg("quiz assigned to study group")
 
 	return c.JSON(fiber.Map{"message": "quiz assigned to study group successfully"})
 }
@@ -496,9 +510,10 @@ func GetQuizzesByStudyGroup(c *fiber.Ctx) error {
 	q := queries.QuizQueries{DB: database.DB}
 	quizzes, err := q.GetQuizzesByStudyGroup(id, limit)
 	if err != nil {
-		log.Printf("GetQuizzesByStudyGroup error: %v", err)
+		log.Error().Err(err).Msg("GetQuizzesByStudyGroup error")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get quizzes for study group"})
 	}
+	log.Info().Str("study_group_id", id).Int("count", len(quizzes)).Msg("quizzes retrieved for study group")
 
 	return c.JSON(fiber.Map{"quizzes": quizzes})
 }
