@@ -21,4 +21,7 @@ func RegisterQuizRoutes(app *fiber.App) {
 	quiz.Post("/attempt", controllers.AttemptQuiz)
 	quiz.Get("/attempts", controllers.GetAttemptHistory)
 	quiz.Get("/attempt/:id", controllers.GetAttemptDetail)
+	quiz.Post("/assign-to-study-group", controllers.AddQuizToStudyGroup)
+
+	app.Get("/study-groups/:id/quizzes", controllers.GetQuizzesByStudyGroup)
 }

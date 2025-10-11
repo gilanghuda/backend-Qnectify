@@ -440,3 +440,65 @@ func GetQuizFile(c *fiber.Ctx) error {
 	c.Set("Content-Disposition", "inline; filename=\""+id+".pdf\"")
 	return c.SendStream(bytes.NewReader(data))
 }
+
+func AddQuizToStudyGroup(c *fiber.Ctx) error {
+	userID, err := utils.ExtractUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	var req struct {
+		QuizID       string `json:"quiz_id"`
+		StudyGroupID string `json:"study_group_id"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.QuizID == "" || req.StudyGroupID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "quiz_id and study_group_id are required"})
+	}
+
+	q := queries.QuizQueries{DB: database.DB}
+	quiz, err := q.GetQuizByID(req.QuizID)
+	if err != nil {
+		log.Printf("GetQuizByID error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch quiz"})
+	}
+	if quiz == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "quiz not found"})
+	}
+
+	if quiz.CreatedBy != userID.String() {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+	}
+
+	if err := q.AssignQuizToStudyGroup(req.QuizID, req.StudyGroupID); err != nil {
+		log.Printf("AssignQuizToStudyGroup error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to assign quiz to study group"})
+	}
+
+	return c.JSON(fiber.Map{"message": "quiz assigned to study group successfully"})
+}
+
+func GetQuizzesByStudyGroup(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "study group id is required"})
+	}
+
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil {
+			limit = v
+		}
+	}
+
+	q := queries.QuizQueries{DB: database.DB}
+	quizzes, err := q.GetQuizzesByStudyGroup(id, limit)
+	if err != nil {
+		log.Printf("GetQuizzesByStudyGroup error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get quizzes for study group"})
+	}
+
+	return c.JSON(fiber.Map{"quizzes": quizzes})
+}

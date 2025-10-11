@@ -547,3 +547,66 @@ LIMIT 10
 	}
 	return res, nil
 }
+
+func (q *QuizQueries) AssignQuizToStudyGroup(quizID string, studyGroupID string) error {
+	qUUID, err := uuid.Parse(quizID)
+	if err != nil {
+		return err
+	}
+	gUUID, err := uuid.Parse(studyGroupID)
+	if err != nil {
+		return err
+	}
+
+	res, err := q.DB.Exec(`UPDATE quizzes SET study_group_id = $1 WHERE id = $2`, gUUID, qUUID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("quiz not found")
+	}
+	return nil
+}
+
+func (q *QuizQueries) GetQuizzesByStudyGroup(studyGroupID string, limit int) ([]models.Quiz, error) {
+	gUUID, err := uuid.Parse(studyGroupID)
+	if err != nil {
+		return nil, err
+	}
+
+	base := `
+		SELECT q.id, q.title, q.description, q.difficulty_level, u.username, q.time_limit, q.created_at,
+			COALESCE((SELECT COUNT(*) FROM quiz_questions qq WHERE qq.quiz_id = q.id), 0) as total_questions
+		FROM quizzes q
+		JOIN users u ON u.uid = q.created_by
+		WHERE q.study_group_id = $1
+		ORDER BY q.created_at DESC`
+	if limit > 0 {
+		base += ` LIMIT ` + fmt.Sprintf("%d", limit)
+	}
+
+	rows, err := q.DB.Query(base, gUUID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := []models.Quiz{}
+	for rows.Next() {
+		var quiz models.Quiz
+		var totalQuestions int
+		if err := rows.Scan(&quiz.ID, &quiz.Title, &quiz.Description, &quiz.Difficulty, &quiz.CreatedBy, &quiz.TimeLimit, &quiz.CreatedAt, &totalQuestions); err != nil {
+			return nil, err
+		}
+		quiz.TotalQuestions = &totalQuestions
+		res = append(res, quiz)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
