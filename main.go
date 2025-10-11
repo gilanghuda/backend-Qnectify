@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
+	"io"
+	stdlog "log"
 	"os"
 	"os/signal"
 	"time"
@@ -13,11 +14,13 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/joho/godotenv"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatalln(err)
+		stdlog.Fatalln(err)
 	}
 }
 
@@ -31,6 +34,21 @@ func run() error {
 		BodyLimit: 20 * 1024 * 1024,
 	})
 
+	otelShutdown, err := utils.SetupTracer()
+	if err != nil {
+		stdlog.Printf("failed to init otel: %v", err)
+	} else {
+		stdlog.Printf("otel initialized successfully")
+		defer func() {
+			_ = otelShutdown(ctx)
+		}()
+	}
+
+	axiomWriter := &utils.AxiomWriter{}
+	multi := io.MultiWriter(os.Stdout, axiomWriter)
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	log.Logger = zerolog.New(multi).With().Timestamp().Logger()
+
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     "https://qnectify-cyan.vercel.app/,http://localhost:3000,http://localhost:3003",
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
@@ -41,16 +59,6 @@ func run() error {
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("versi 1.2.3 ")
 	})
-
-	otelShutdown, err := utils.SetupTracer()
-	if err != nil {
-		log.Printf("failed to init otel: %v", err)
-	} else {
-		log.Printf("otel initialized successfully")
-		defer func() {
-			_ = otelShutdown(ctx)
-		}()
-	}
 
 	_, err = database.InitDB()
 	if err != nil {
@@ -73,7 +81,7 @@ func run() error {
 		defer cancel()
 
 		if err := app.Shutdown(); err != nil {
-			log.Printf("failed to shutdown Fiber app: %v", err)
+			stdlog.Printf("failed to shutdown Fiber app: %v", err)
 		}
 
 		return nil

@@ -1,23 +1,17 @@
 package utils
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
-	"go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
 const (
@@ -26,100 +20,99 @@ const (
 	deploymentEnvironment = "production"
 )
 
+var (
+	httpClient   *http.Client
+	ingestURL    string
+	axiomToken   string
+	axiomDataset string
+)
+
 func SetupTracer() (func(context.Context) error, error) {
 	ctx := context.Background()
-	return InstallExportPipeline(ctx)
-}
-
-func Resource() *resource.Resource {
-	return resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceNameKey.String(serviceName),
-		semconv.ServiceVersionKey.String(serviceVersion),
-		attribute.String("environment", deploymentEnvironment),
-	)
+	if _, err := InstallExportPipeline(ctx); err != nil {
+		return nil, err
+	}
+	return func(context.Context) error { return nil }, nil
 }
 
 func InstallExportPipeline(ctx context.Context) (func(context.Context) error, error) {
 	token := os.Getenv("AXIOM_API_TOKEN")
 	dataset := os.Getenv("AXIOM_DATASET")
-	endpoint := os.Getenv("AXIOM_OTLP_ENDPOINT")
-	path := os.Getenv("AXIOM_OTLP_PATH")
-	orgID := os.Getenv("AXIOM_ORG_ID")
+	endpoint := os.Getenv("AXIOM_INGEST_ENDPOINT")
 
-	if token == "" || dataset == "" || endpoint == "" {
-		return nil, fmt.Errorf("AXIOM_API_TOKEN, AXIOM_DATASET, and AXIOM_OTLP_ENDPOINT environment variables must be set")
+	if token == "" || dataset == "" {
+		return nil, fmt.Errorf("AXIOM_API_TOKEN and AXIOM_DATASET environment variables must be set")
 	}
 
-	h := endpoint
-	if strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://") {
-		u, err := url.Parse(h)
-		if err != nil {
-			return nil, fmt.Errorf("invalid AXIOM_OTLP_ENDPOINT: %w", err)
-		}
-		if u.Host == "" {
-			return nil, fmt.Errorf("invalid AXIOM_OTLP_ENDPOINT, missing host")
-		}
-		h = u.Host
-		if path == "" && u.Path != "" {
-			path = u.Path
-		}
+	if endpoint == "" {
+		endpoint = "https://api.axiom.co/v1/datasets/" + url.PathEscape(dataset) + "/ingest"
 	}
 
-	if !strings.Contains(h, ":") {
-		h = h + ":443"
+	if u, err := url.Parse(endpoint); err != nil || u.Scheme == "" || u.Host == "" {
+		return nil, fmt.Errorf("invalid AXIOM_INGEST_ENDPOINT: %s", endpoint)
 	}
 
-	if path == "" {
-		path = "/v1/otlp/traces"
+	axiomToken = token
+	axiomDataset = dataset
+	ingestURL = endpoint
+
+	httpClient = &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{},
+		},
 	}
 
-	headers := map[string]string{
-		"Authorization":   "Bearer " + token,
-		"X-AXIOM-DATASET": dataset,
-	}
-	if orgID != "" {
-		headers["X-AXIOM-ORG-ID"] = orgID
+	log.Info().Str("ingest_url", ingestURL).Str("dataset", axiomDataset).Msg("axiom ingest configured")
+
+	return func(context.Context) error { return nil }, nil
+}
+
+func EmitLog(ctx context.Context, level string, message string, attrs map[string]string) error {
+	if httpClient == nil || ingestURL == "" {
+		return fmt.Errorf("ingest not configured")
 	}
 
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(h),
-		otlptracehttp.WithURLPath(path),
-		otlptracehttp.WithHeaders(headers),
-		otlptracehttp.WithTLSClientConfig(&tls.Config{}),
-	)
+	event := map[string]interface{}{
+		"_time":   time.Now().UTC().Format(time.RFC3339),
+		"message": message,
+		"level":   level,
+		"service": serviceName,
+	}
+	for k, v := range attrs {
+		event[k] = v
+	}
+
+	payload, err := json.Marshal([]map[string]interface{}{event})
 	if err != nil {
-		log.Error().Err(err).Msg("failed to create otlp http exporter")
-		return nil, err
+		log.Error().Err(err).Msg("failed to marshal ingest payload")
+		return err
 	}
 
-	log.Info().Str("endpoint", h).Str("url_path", path).Str("dataset", dataset).Msg("otel exporter configured")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ingestURL, bytes.NewReader(payload))
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create ingest request")
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+axiomToken)
+	req.Header.Set("Content-Type", "application/json")
 
-	tracerProvider := trace.NewTracerProvider(
-		trace.WithBatcher(exporter),
-		trace.WithResource(Resource()),
-	)
-	otel.SetTracerProvider(tracerProvider)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to send ingest request")
+		return err
+	}
+	defer resp.Body.Close()
 
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Error().Int("status", resp.StatusCode).Msg("ingest request failed")
+		return fmt.Errorf("ingest request failed with status %d", resp.StatusCode)
+	}
 
-	func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	return nil
+}
 
-		tr := otel.Tracer("axiom-debug")
-		_, span := tr.Start(ctx, "axiom-startup-test")
-		span.End()
+func init() {
 
-		if err := tracerProvider.ForceFlush(ctx); err != nil {
-			log.Error().Err(err).Msg("failed to flush initial test span to axiom")
-		} else {
-			log.Info().Str("dataset", dataset).Msg("initial test span flushed to axiom")
-		}
-	}()
-
-	return tracerProvider.Shutdown, nil
+	EmitLogFunc = EmitLog
 }
