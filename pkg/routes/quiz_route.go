@@ -12,6 +12,8 @@ func RegisterQuizRoutes(app *fiber.App) {
 	app.Get("/quiz/leaderboard/study-groups", controllers.GetStudyGroupLeaderboard)
 	app.Get("/quizes/:id", controllers.GetQuizDetail)
 
+	app.Get("/files/:id", controllers.GetQuizFile)
+
 	quiz := app.Group("/quiz", middleware.JWTProtected())
 	quiz.Post("/upload", controllers.UploadAndGenerateQuiz)
 	quiz.Get("/getMyQuiz", controllers.GetQuizByUser)

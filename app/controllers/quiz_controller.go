@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"strconv"
 
@@ -73,7 +75,16 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 	}
 	defer file.Close()
 
-	quizIntf, err := utils.GenerateQuiz(file, numQuestions, difficulty)
+	// Read the uploaded file into memory so we can both upload the original PDF
+	// to the external service and pass a reader to GenerateQuiz.
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("failed to read uploaded file: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to read uploaded file"})
+	}
+
+	// First generate quiz from the uploaded file
+	quizIntf, err := utils.GenerateQuiz(bytes.NewReader(fileBytes), numQuestions, difficulty)
 	if err != nil {
 		log.Printf("Error generating quiz from file: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -109,11 +120,18 @@ func UploadAndGenerateQuiz(c *fiber.Ctx) error {
 			_ = tx.Rollback()
 		}
 	}()
+
 	quizQueries := queries.QuizQueries{DB: database.DB}
 	quizID, err := quizQueries.InsertQuiz(quiz, userID, description, timeLimit)
 	if err != nil {
 		log.Printf("InsertQuiz error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to insert quiz"})
+	}
+
+	// Use quizID as id_file when saving original PDF
+	if err := utils.SaveFile(quizID, fileHeader.Filename, fileBytes); err != nil {
+		log.Printf("failed to upload original file: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to upload original file"})
 	}
 
 	questionIDs, err := quizQueries.InsertQuestionsBulk(quizID, quiz.Questions)
@@ -400,4 +418,25 @@ func GetAttemptDetail(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(resp)
+}
+
+func GetQuizFile(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file id is required"})
+	}
+
+	data, contentType, err := utils.GetFile(id)
+	if err != nil {
+		log.Printf("GetFile error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch file"})
+	}
+
+	if contentType == "" {
+		contentType = "application/pdf"
+	}
+
+	c.Set("Content-Type", contentType)
+	c.Set("Content-Disposition", "inline; filename=\""+id+".pdf\"")
+	return c.SendStream(bytes.NewReader(data))
 }
